@@ -141,6 +141,17 @@ class SourceAttributor:
         out["signals"] = signals
         out["ranked_sources"] = [{"source": k, "score": round(v, 3)} for k, v in ranked]
         out["confidence"] = round(float(max(cp.values())) if cp else 0.5, 3)
+        # 4.4 — per-attribution uncertainty: normalised entropy of the class
+        # posterior (0 = certain, 1 = maximally uncertain) + top-2 margin.
+        if cp:
+            p = np.array(list(cp.values()), dtype=float)
+            p = p[p > 0]
+            ent = float(-(p * np.log(p)).sum() / np.log(len(cp))) if len(cp) > 1 else 0.0
+            top2 = sorted(cp.values(), reverse=True)[:2]
+            out["uncertainty"] = round(ent, 3)
+            out["margin"] = round(float(top2[0] - (top2[1] if len(top2) > 1 else 0.0)), 3)
+        else:
+            out["uncertainty"], out["margin"] = 0.5, 0.0
         out["edgar_prior_pm25"] = {k: round(v, 3) for k, v in self.edgar_prior(row).items()}
         return out
 

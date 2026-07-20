@@ -78,6 +78,26 @@ def health_advice(band: str) -> str:
     return HEALTH_ADVICE.get(band, "")
 
 
+# ---- Policy validation rules (Part 9 / §8) — EDITABLE without touching code ---
+# Non-developers can tune the validation engine here. Each block is documented.
+VALIDATION_RULES = {
+    # action -> months it is meaningful in (empty list/absent = all year)
+    "seasonal_actions": {"biomass_ban": [10, 11, 12, 1, 2]},   # Oct–Feb burning season
+    # which authority OWNS each action (defaults to CAQM)
+    "action_authority": {"road_dust_suppression": "DPCC"},
+    # 8.2 — which cities each authority has JURISDICTION over
+    "authority_jurisdiction": {
+        "CAQM": ["Delhi", "NCR", "India"], "DPCC": ["Delhi"],
+        "CPCB": ["Delhi", "NCR", "India"], "MoEFCC": ["Delhi", "NCR", "India"],
+        "WHO": ["Delhi", "NCR", "India", "Global"], "Delhi Government": ["Delhi"],
+    },
+    # 8.3 — action validity window {action: {"from": ISO, "until": ISO}} (absent = always)
+    "action_effective_window": {},
+    # redundant pairs -> keep the higher-confidence one
+    "conflicts": [["odd_even", "traffic_restriction"]],
+}
+
+
 # ---- Scenario Builder (dashboard) — 7 policy levers -----------------------
 # Each slider is an intervention strength 0–100%. The value per feature is the
 # multiplier at 100% (strongest); the effective multiplier scales with the
@@ -221,6 +241,7 @@ class AdvisorConfig:
     semantic_weight: float = 0.5
     bm25_weight: float = 0.3
     graph_weight: float = 0.2
+    query_expansion: bool = True       # 5.6: domain term expansion for BM25
 
     # ---- reranker (Part 6) ----
     reranker_model: str = _env("ADVISOR_RERANKER", "cross-encoder/ms-marco-MiniLM-L-6-v2")
@@ -230,7 +251,9 @@ class AdvisorConfig:
 
     # ---- LLM (Part 8) — CLOUD ONLY (no local/Ollama) ----
     llm_provider: str = _env("ADVISOR_LLM_PROVIDER", "groq")   # groq | anthropic | gemini | mock
-    llm_model: str = _env("ADVISOR_LLM_MODEL", "gemma2-9b-it")
+    # Groq's current strong reasoning model (gemma2-9b-it was decommissioned 2026).
+    # Fast/cheap alternative: llama-3.1-8b-instant.
+    llm_model: str = _env("ADVISOR_LLM_MODEL", "llama-3.3-70b-versatile")
     llm_temperature: float = 0.2
     llm_max_tokens: int = 1500
     groq_api_key: str = _env("GROQ_API_KEY", "")

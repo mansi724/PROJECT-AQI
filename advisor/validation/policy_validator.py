@@ -26,17 +26,14 @@ from dataclasses import dataclass, field
 
 from advisor.config import (
     CONFIG, INTERVENTION_FEATURE_MAP, INTERVENTION_STAGES, ACTION_TARGET_SOURCE,
-    ACTION_CATALOGUE, grap_stage,
+    ACTION_CATALOGUE, VALIDATION_RULES, grap_stage,
 )
 
-# actions that only make sense in the cool/burning season (Oct–Feb)
-_SEASONAL = {"biomass_ban"}
-_WINTER_MONTHS = {10, 11, 12, 1, 2}
-# actions whose authority ownership (for the authority check)
+# All rules come from config.VALIDATION_RULES (8.1) — editable without code.
+_RULES = VALIDATION_RULES
 _ACTION_AUTHORITY = {a: "CAQM" for a in INTERVENTION_FEATURE_MAP}
-_ACTION_AUTHORITY.update({"biomass_ban": "CAQM", "road_dust_suppression": "DPCC"})
-# pairs that are redundant together -> keep the stronger only
-_CONFLICTS = [("odd_even", "traffic_restriction")]
+_ACTION_AUTHORITY.update(_RULES.get("action_authority", {}))
+_CONFLICTS = [tuple(p) for p in _RULES.get("conflicts", [])]
 
 
 @dataclass
@@ -79,15 +76,30 @@ class PolicyValidator:
             res.valid = False
             res.reasons.append(f"not applicable at {stage} (allowed: {', '.join(stages_ok)})")
 
-        # 3. city applicability (this deployment is Delhi-NCR)
-        if city not in ("Delhi", "NCR", "India"):
-            res.flags.append(f"authored for Delhi-NCR, ward city is {city}")
+        # 3. authority jurisdiction (8.2) — the owning authority must govern this city
+        juris = _RULES.get("authority_jurisdiction", {}).get(res.authority)
+        if juris is not None and city not in juris:
+            res.valid = False
+            res.reasons.append(f"{res.authority} has no jurisdiction over {city} "
+                               f"(governs {', '.join(juris)})")
 
-        # 4. season applicability
-        if aid in _SEASONAL and month and month not in _WINTER_MONTHS:
-            res.flags.append("seasonal measure outside the Oct–Feb burning window")
+        # 4. temporal validity (8.3) — reject if outside the action's effective window
+        window = _RULES.get("action_effective_window", {}).get(aid)
+        ts = str(ward_context.get("timestamp", ""))[:10]
+        if window and ts:
+            if window.get("from") and ts < window["from"]:
+                res.valid = False
+                res.reasons.append(f"not yet in effect (from {window['from']})")
+            if window.get("until") and ts > window["until"]:
+                res.valid = False
+                res.reasons.append(f"superseded/expired after {window['until']}")
 
-        # 5. source relevance
+        # 5. season applicability
+        season_months = _RULES.get("seasonal_actions", {}).get(aid)
+        if season_months and month and month not in season_months:
+            res.flags.append("seasonal measure outside its effective window")
+
+        # 6. source relevance
         tgt = ACTION_TARGET_SOURCE.get(aid)
         if tgt and dominant and tgt not in dominant:
             res.flags.append(f"target source '{tgt}' is not among dominant sources")

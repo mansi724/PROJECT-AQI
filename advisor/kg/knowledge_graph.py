@@ -158,23 +158,49 @@ class KnowledgeGraph:
             acts = [a for a in acts if any(s == stage for s, _ in self.out(a, "recommended_for"))]
         return acts
 
+    _STAGE_ORDER = {"Stage I": 1, "Stage II": 2, "Stage III": 3, "Stage IV": 4}
+
     def policies_for(self, stage=None, sources=None, pollutants=None) -> list[dict]:
-        """Return policy nodes connected to the given stage/sources/pollutants."""
-        hits: dict[str, float] = {}
-        def bump(doc_id, w):
-            hits[doc_id] = hits.get(doc_id, 0.0) + w
-        if stage and stage in self.g:
-            for u, _ in self.incoming(stage, "defines"):
-                bump(u, 1.0)
+        """Return policy nodes connected to the given stage/sources/pollutants.
+
+        6.2 — the EXACT stage match dominates (weight 3.0) so a wrong-stage doc can
+        never outrank the right one. GRAP is cumulative, so lower-stage docs get a
+        modest relevance bump; higher-stage docs a small one. Tag-based source/
+        intervention 'addresses' hits are SECONDARY and CAPPED, so accumulating
+        tags can't overwhelm the stage signal.
+        """
+        stage_hits: dict[str, float] = {}
+        tag_hits: dict[str, float] = {}
+        qrank = self._STAGE_ORDER.get(stage)
+
+        # 1. stage relevance (dominant), stage-aware
+        for s, r in self._STAGE_ORDER.items():
+            if s not in self.g:
+                continue
+            for u, _ in self.incoming(s, "defines"):
+                if stage is None:
+                    w = 0.5
+                elif s == stage:
+                    w = 3.0                       # exact stage
+                elif qrank and r < qrank:
+                    w = 0.8                       # cumulative lower stage (still applies)
+                else:
+                    w = 0.3                       # higher stage (context)
+                stage_hits[u] = max(stage_hits.get(u, 0.0), w)
+
+        # 2. source / intervention 'addresses' — secondary, CAPPED at 1.0/doc
+        def add_tag(doc_id, w):
+            tag_hits[doc_id] = min(tag_hits.get(doc_id, 0.0) + w, 1.0)
         for src in (sources or []):
             if src in self.g:
                 for u, _ in self.incoming(src, "addresses"):
-                    bump(u, 0.7)
-        # policies addressing interventions that reduce these sources
-        for src in (sources or []):
+                    add_tag(u, 0.4)
             for act in self.interventions_for_source(src, stage):
                 for u, _ in self.incoming(act, "addresses"):
-                    bump(u, 0.5)
+                    add_tag(u, 0.25)
+
+        hits = {d: stage_hits.get(d, 0.0) + tag_hits.get(d, 0.0)
+                for d in set(stage_hits) | set(tag_hits)}
         ranked = sorted(hits.items(), key=lambda kv: -kv[1])
         return [{"doc_id": d, "weight": round(w, 3),
                  "title": self.g.nodes[d].get("title", ""),

@@ -21,7 +21,7 @@ class LLMClient:
     is_mock = False
     provider = "base"
 
-    def generate(self, system: str, prompt: str) -> str:
+    def generate(self, system: str, prompt: str, json_mode: bool = False) -> str:
         raise NotImplementedError
 
 
@@ -29,14 +29,18 @@ class GroqClient(LLMClient):
     provider = "groq"
 
     def __init__(self, config=CONFIG):
-        from langchain_groq import ChatGroq
+        from groq import Groq
         self.cfg = config
-        self.llm = ChatGroq(model=config.llm_model, temperature=config.llm_temperature,
-                            max_tokens=config.llm_max_tokens, api_key=config.groq_api_key)
+        self.client = Groq(api_key=config.groq_api_key)
 
-    def generate(self, system: str, prompt: str) -> str:
-        msg = self.llm.invoke([("system", system), ("human", prompt)])
-        return msg.content
+    def generate(self, system: str, prompt: str, json_mode: bool = False) -> str:
+        kw = {"response_format": {"type": "json_object"}} if json_mode else {}   # 7.2
+        r = self.client.chat.completions.create(
+            model=self.cfg.llm_model, temperature=self.cfg.llm_temperature,
+            max_tokens=self.cfg.llm_max_tokens,
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": prompt}], **kw)
+        return r.choices[0].message.content
 
 
 class AnthropicClient(LLMClient):
@@ -48,7 +52,9 @@ class AnthropicClient(LLMClient):
         self.client = anthropic.Anthropic(api_key=config.anthropic_api_key)
         self.model = config.llm_model if "claude" in config.llm_model else "claude-sonnet-5"
 
-    def generate(self, system: str, prompt: str) -> str:
+    def generate(self, system: str, prompt: str, json_mode: bool = False) -> str:
+        if json_mode:
+            prompt += "\n\nRespond with a single valid JSON object and nothing else."
         r = self.client.messages.create(
             model=self.model, max_tokens=self.cfg.llm_max_tokens,
             temperature=self.cfg.llm_temperature, system=system,
@@ -66,7 +72,9 @@ class GeminiClient(LLMClient):
         self.model = genai.GenerativeModel(
             config.llm_model if "gemini" in config.llm_model else "gemini-1.5-flash")
 
-    def generate(self, system: str, prompt: str) -> str:
+    def generate(self, system: str, prompt: str, json_mode: bool = False) -> str:
+        if json_mode:
+            prompt += "\n\nRespond with a single valid JSON object and nothing else."
         r = self.model.generate_content(f"{system}\n\n{prompt}")
         return r.text
 
@@ -78,7 +86,7 @@ class MockClient(LLMClient):
     is_mock = True
     provider = "mock"
 
-    def generate(self, system: str, prompt: str) -> str:
+    def generate(self, system: str, prompt: str, json_mode: bool = False) -> str:
         payload = _parse_mock_payload(prompt)
         return json.dumps(_mock_reason(payload), indent=2)
 

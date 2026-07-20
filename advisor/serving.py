@@ -14,8 +14,10 @@ service, so the frozen pipeline has exactly one, well-defined seam.
 """
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -86,22 +88,36 @@ class ForecastService:
 
         self.times = self.d.times
 
-        # ---- optional ensemble (improvement 2.1) -------------------------
-        # If member checkpoints exist, forecasts/counterfactuals are averaged
-        # across them (better accuracy + calibration). Members share the exact
-        # snapshot interface as the explainable model, so nothing else changes.
-        # Explainability still uses the single ctx.model (SHAP/GNNExplainer).
-        self.ensemble = self._load_ensemble()
+        # ---- forecast models by horizon (improvements 2.1 + 2.2) ---------
+        # h24 = the 4-member ensemble (averaged); h48/h72 = single models if
+        # their checkpoints exist. All share the snapshot interface, so the same
+        # node features drive every horizon. Explainability + counterfactual
+        # stay on h24 (ctx.model). Missing horizons fall back to h24.
+        self._ckpt_dir = Path(__file__).resolve().parent.parent / "models" / "checkpoints"
+        self.ensemble = self._load_glob(f"gnn_forecast_h{self.cfg.horizon}_notemporal_ens*.pt")
+        base = self.ensemble or [(self.ctx.model, self.ctx.y_mu, self.ctx.y_sd)]
+        self.horizon_models = {self.cfg.horizon: base}
+        for h in (48, 72):
+            single = self._load_glob(f"gnn_forecast_h{h}_notemporal.pt")
+            if single:
+                self.horizon_models[h] = single
         if self.ensemble:
-            print(f"[serving] using {len(self.ensemble)}-model ensemble for forecasts")
+            print(f"[serving] h{self.cfg.horizon}: {len(self.ensemble)}-model ensemble")
+        print(f"[serving] horizons available: {sorted(self.horizon_models)}")
 
-    def _load_ensemble(self) -> list:
-        from pathlib import Path
+        # ---- conformal calibration (improvement 2.3) ---------------------
+        # Post-hoc δ per horizon widening p10/p90 to the target coverage.
+        self.conformal = {}
+        cpath = self._ckpt_dir / "conformal.json"
+        if cpath.exists():
+            j = json.loads(cpath.read_text())
+            self.conformal = {int(h): float(dv) for h, dv in j.get("delta", {}).items()}
+            print(f"[serving] conformal deltas loaded: {self.conformal}")
+
+    def _load_glob(self, pattern: str) -> list:
         from models.gnn_forecast import WardGraphTransformer
-        ckpt_dir = Path(__file__).resolve().parent.parent / "models" / "checkpoints"
-        ckpts = sorted(ckpt_dir.glob(f"gnn_forecast_h{self.cfg.horizon}_notemporal_ens*.pt"))
         members = []
-        for p in ckpts:
+        for p in sorted(self._ckpt_dir.glob(pattern)):
             c = torch.load(p, map_location=self.ctx.device, weights_only=False)
             m = WardGraphTransformer(
                 n_static=len(self.d.static_names), n_dyn=len(self.d.dyn_names),
@@ -111,6 +127,9 @@ class ForecastService:
             m.load_state_dict(c["state_dict"]); m.eval()
             members.append((m, c["y_mu"], c["y_sd"]))
         return members
+
+    def available_horizons(self) -> list:
+        return sorted(self.horizon_models)
 
     # ---- identity / time helpers -----------------------------------------
     def ward_to_node(self, ward_id) -> int:
@@ -146,29 +165,43 @@ class ForecastService:
 
     # ---- forecast --------------------------------------------------------
     @torch.no_grad()
-    def _forward_all(self, node_x: torch.Tensor, t: int) -> np.ndarray:
-        """[N, Q] de-normalised quantiles. Averages the ensemble members if
-        loaded (improvement 2.1); otherwise the single explainable model."""
+    def _forward_all(self, node_x: torch.Tensor, t: int, horizon: int | None = None) -> np.ndarray:
+        """[N, Q] de-normalised quantiles for the requested horizon. Averages the
+        horizon's model(s) — h24 is the 4-member ensemble; h48/h72 single models
+        if present. Unknown horizon falls back to the default (h24)."""
+        horizon = horizon or self.cfg.horizon
+        members = self.horizon_models.get(horizon) or self.horizon_models[self.cfg.horizon]
+        acc = self._forward_all_raw(node_x, t, horizon)
+        d = self.conformal.get(horizon)              # widen band to target coverage (2.3)
+        if d:
+            acc = acc.copy()
+            acc[:, 0] -= d
+            acc[:, -1] += d
+        return acc
+
+    @torch.no_grad()
+    def _forward_all_raw(self, node_x: torch.Tensor, t: int, horizon: int | None = None) -> np.ndarray:
+        """Ensemble-averaged quantiles WITHOUT the conformal widening."""
+        horizon = horizon or self.cfg.horizon
+        members = self.horizon_models.get(horizon) or self.horizon_models[self.cfg.horizon]
         ea = self.ctx.edge_attr(t)
-        if self.ensemble:
-            acc = None
-            for m, mu, sd in self.ensemble:
-                q = m(node_x, self.ctx.edge_index, ea).cpu().numpy() * sd + mu
-                acc = q if acc is None else acc + q
-            return acc / len(self.ensemble)
-        out = self.ctx.model(node_x, self.ctx.edge_index, ea)
-        return out.cpu().numpy() * self.ctx.y_sd + self.ctx.y_mu
+        acc = None
+        for m, mu, sd in members:
+            q = m(node_x, self.ctx.edge_index, ea).cpu().numpy() * sd + mu
+            acc = q if acc is None else acc + q
+        return acc / len(members)
 
     @torch.no_grad()
     def _quantiles(self, node_x: torch.Tensor, t: int, node_idx: int) -> np.ndarray:
         return self._forward_all(node_x, t)[node_idx]
 
-    def forecast(self, node_idx: int, t: int) -> Forecast:
-        q = self._quantiles(self.ctx.node_x(t), t, node_idx)
+    def forecast(self, node_idx: int, t: int, horizon: int | None = None) -> Forecast:
+        horizon = horizon or self.cfg.horizon
+        q = self._forward_all(self.ctx.node_x(t), t, horizon)[node_idx]
         meta = self.node_meta(node_idx)
         return Forecast(ward_id=meta["ward_id"], node_idx=node_idx,
                         point_id=meta["point_id"], time=pd.Timestamp(self.times[t]),
-                        horizon_h=self.cfg.horizon,
+                        horizon_h=horizon,
                         p10=float(q[0]), p50=float(q[self.ctx.qmid]), p90=float(q[-1]))
 
     @torch.no_grad()
@@ -223,6 +256,26 @@ class ForecastService:
             out[str(r.ward_id)] = prof.get("dominant_class", "mixed")
         return out
 
+    def wind_rose(self, node_idx: int, t: int, hours: int = 48) -> dict:
+        """Wind speed binned by 16 compass directions over the last `hours`
+        (for the ward's cell) — the wind-rose polar chart."""
+        pid = int(self.d.nodes.loc[self.d.nodes["node_idx"] == node_idx, "point_id"].iloc[0])
+        dirs = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+                "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW"]
+        speed_bins = ["0-5", "5-10", "10-15", "15-20", "20+"]
+        edges = [0, 5, 10, 15, 20, 1e9]
+        mat = [[0] * 16 for _ in speed_bins]
+        lo = max(0, t - hours)
+        for tt in range(lo, t + 1):
+            r = self.raw.at(pid, self.times[tt])
+            sp, dg = r.get("wind_speed_10m"), r.get("wind_direction_10m")
+            if sp is None or dg is None:
+                continue
+            di = int((dg % 360) / 22.5 + 0.5) % 16
+            si = next(i for i in range(len(edges) - 1) if edges[i] <= sp < edges[i + 1])
+            mat[si][di] += 1
+        return {"directions": dirs, "speed_bins": speed_bins, "matrix": mat}
+
     def history(self, node_idx: int, t: int, hours: int = 48) -> list[dict]:
         """Recent raw AQI series for the ward's cell (for the trend chart)."""
         pid = int(self.d.nodes.loc[self.d.nodes["node_idx"] == node_idx, "point_id"].iloc[0])
@@ -267,6 +320,34 @@ class ForecastService:
         return self.attr.profile(self._attr_row(node_idx, t))
 
     # ---- explanations (reuse SHAP + GNNExplainer) ------------------------
+    # ---- explanations with a persistent disk cache (improvement 3.1) -----
+    # SHAP + GNNExplainer cost ~5 s/ward. Results are deterministic per
+    # (ward, hour, model), so we memoise them to disk once — every later view
+    # (this session or the next) is instant. Delete data/explain/cache.json to
+    # invalidate after a model retrain.
+    @property
+    def _explain_cache(self) -> dict:
+        if not hasattr(self, "_ecache"):
+            p = self.cfg.serving_dir.parent / "explain" / "cache.json"
+            self._ecache_path = p
+            self._ecache = json.loads(p.read_text()) if p.exists() else {}
+        return self._ecache
+
+    def _explain_save(self):
+        self._ecache_path.parent.mkdir(parents=True, exist_ok=True)
+        self._ecache_path.write_text(json.dumps(self._ecache))
+
+    def explanations(self, node_idx: int, t: int, shap_top: int = 8, nbr_top: int = 6) -> dict:
+        key = f"{node_idx}_{t}"
+        cache = self._explain_cache
+        if key in cache:
+            return {**cache[key], "_cached": True}
+        out = {"top_feature_drivers": self.shap_local(node_idx, t, top=shap_top),
+               "influential_neighbours": self.gnn_neighbours(node_idx, t, top=nbr_top)}
+        cache[key] = out
+        self._explain_save()
+        return out
+
     def shap_local(self, node_idx: int, t: int, top: int = 8) -> list[dict]:
         from explain_gnn import shap_ward
         df, _neigh = shap_ward(self.ctx, node_idx, t)
@@ -282,26 +363,56 @@ class ForecastService:
 
     # ---- counterfactual (Part 10) — edit raw features, re-run frozen GNN --
     @torch.no_grad()
-    def counterfactual(self, node_idx: int, t: int, feature_multipliers: dict) -> dict:
+    def counterfactual(self, node_idx: int, t: int, feature_multipliers: dict,
+                       spillover: bool = False) -> dict:
         base_x = self.ctx.node_x(t).clone()
-        base_q = self._quantiles(base_x, t, node_idx)
+        base_q = self._quantiles(base_x, t, node_idx)      # [Q] p10/p50/p90
         x = base_x.clone()
+
+        # 9.2 — target the ward, and optionally its graph neighbours at half
+        # strength (a real intervention spills over into adjacent wards).
+        targets = {node_idx: 1.0}
+        if spillover:
+            ei = self.ctx.edge_index
+            for n in ei[0][ei[1] == node_idx].tolist():
+                targets.setdefault(int(n), 0.5)
+
         applied = {}
         for feat, mult in feature_multipliers.items():
             pos = self._dyn_pos.get(feat)
             if pos is None or not self.fs.known(feat):
                 continue
             col = self._n_static + pos
-            cur_scaled = float(x[node_idx, col].item())
-            raw = self.fs.to_raw(feat, cur_scaled)
-            new_raw = max(raw * mult, 0.0)
-            x[node_idx, col] = self.fs.to_scaled(feat, new_raw)
-            applied[feat] = {"from": round(raw, 2), "to": round(new_raw, 2), "mult": mult}
+            for tn, strength in targets.items():
+                cur_scaled = float(x[tn, col].item())
+                raw = self.fs.to_raw(feat, cur_scaled)
+                eff = 1.0 - strength * (1.0 - mult)        # scale edit by spillover strength
+                new_raw = max(raw * eff, 0.0)
+                x[tn, col] = self.fs.to_scaled(feat, new_raw)
+                if tn == node_idx:
+                    applied[feat] = {"from": round(raw, 2), "to": round(new_raw, 2), "mult": mult}
         new_q = self._quantiles(x, t, node_idx)
-        return {"aqi_before": round(float(base_q[self.ctx.qmid]), 1),
-                "aqi_after": round(float(new_q[self.ctx.qmid]), 1),
-                "delta": round(float(new_q[self.ctx.qmid] - base_q[self.ctx.qmid]), 1),
+        qm = self.ctx.qmid
+        return {"aqi_before": round(float(base_q[qm]), 1),
+                "aqi_after": round(float(new_q[qm]), 1),
+                "delta": round(float(new_q[qm] - base_q[qm]), 1),
+                "before_band": [round(float(base_q[0]), 1), round(float(base_q[-1]), 1)],  # 9.4
+                "after_band": [round(float(new_q[0]), 1), round(float(new_q[-1]), 1)],      # 9.4
+                "spillover": spillover, "n_wards_affected": len(targets),
                 "applied_features": applied}
+
+    def attribution_after(self, node_idx: int, t: int, feature_multipliers: dict) -> dict:
+        """9.3 — TRUE post-intervention source split: re-run the attribution heads
+        on the modified pollutant features (not an approximate share-shrink)."""
+        row = self._attr_row(node_idx, t).copy()
+        for feat, mult in feature_multipliers.items():
+            if feat in row.index and self.fs.known(feat):
+                raw = self.fs.to_raw(feat, float(row[feat]))
+                row[feat] = self.fs.to_scaled(feat, max(raw * mult, 0.0))
+        prof = self.attr.profile(row)
+        ranked = [(r["source"], r["score"]) for r in prof["ranked_sources"] if r["score"] > 0]
+        tot = sum(s for _, s in ranked) or 1.0
+        return {k: round(v / tot, 3) for k, v in ranked}
 
 
 @lru_cache(maxsize=1)

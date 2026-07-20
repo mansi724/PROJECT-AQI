@@ -149,19 +149,9 @@ def simulate(req: SimRequest):
     wc = ContextBuilder(s).build(node_idx=node, time_index=t, include_explanations=False)
     before_sources = wc.dominant_sources
 
-    # approximate post-intervention source split: shrink each source by the
-    # strength of the sliders that target it, then renormalise.
-    src_reduction: dict[str, float] = {}
-    for lever, pct in active:
-        tgt = SLIDER_META[lever]["source"]
-        src_reduction[tgt] = max(src_reduction.get(tgt, 0.0), pct / 100.0 * 0.6)
-    after_sources, tot = {}, 0.0
-    for src, share in before_sources.items():
-        key = "industrial" if src == "industry" else src
-        after_sources[src] = share * (1.0 - src_reduction.get(key, 0.0))
-        tot += after_sources[src]
-    if tot > 0:
-        after_sources = {k: round(v / tot, 3) for k, v in after_sources.items()}
+    # 9.3 — TRUE post-intervention source split: re-run the attribution heads on
+    # the modified features (not an approximate share-shrink).
+    after_sources = s.attribution_after(node, t, merged) if merged else before_sources
 
     aqi_before = wc.predicted_aqi
     aqi_after = cf["aqi_after"] if cf else aqi_before
@@ -172,9 +162,75 @@ def simulate(req: SimRequest):
     return {"ward_id": req.ward_id, "aqi_before": aqi_before, "aqi_after": aqi_after,
             "delta": round(aqi_after - aqi_before, 1),
             "improvement_pct": round(100 * (aqi_before - aqi_after) / aqi_before, 1) if aqi_before else 0,
+            "after_band": cf["after_band"] if cf else None,        # 9.4
             "before_sources": before_sources, "after_sources": after_sources,
             "applied_features": cf["applied_features"] if cf else {},
             "active_levers": [l for l, _ in active], "recommendation": rec}
+
+
+@app.get("/cost_effectiveness")
+def cost_effectiveness(ward_id: str, time_index: int | None = None):
+    """9.5 — AQI drop per unit cost for each action (a decision-ranking aid)."""
+    from advisor.simulation.counterfactual import CounterfactualSimulator
+    from advisor.config import ACTION_CATALOGUE
+    s = svc()
+    try:
+        node = s.ward_to_node(ward_id)
+    except ValueError:
+        raise HTTPException(404, f"ward {ward_id} not found")
+    t = _resolve_t(time_index)
+    sim = CounterfactualSimulator(s)
+    out = []
+    for aid, meta in ACTION_CATALOGUE.items():
+        r = sim.simulate_action(node, t, aid)
+        drop = max(-r.delta, 0.0)
+        cost = float(meta.get("cost", 0.5))
+        out.append({"action": aid, "label": meta.get("label", aid),
+                    "aqi_drop": round(drop, 1), "cost": cost,
+                    "time_to_effect_h": meta.get("time_to_effect_h"),
+                    "effectiveness": round(drop / (cost + 0.05), 2)})
+    out.sort(key=lambda d: -d["effectiveness"])
+    return {"ward_id": ward_id, "actions": out}
+
+
+@app.get("/explain/global")
+def explain_global(n_queries: int = 200):
+    """3.2 — global feature importance (mean |SHAP| across many ward-hours)."""
+    if "shap_global" not in _STATE:
+        from explain_gnn import shap_global
+        g = shap_global(svc().ctx, n_queries=n_queries)
+        _STATE["shap_global"] = [{"feature": r.feature,
+                                  "mean_abs_shap_aqi": round(float(r.mean_abs_shap_aqi), 3)}
+                                 for r in g.head(15).itertuples()]
+    return {"global_importance": _STATE["shap_global"]}
+
+
+@app.get("/explain/stability")
+def explain_stability(ward_id: str, time_index: int | None = None, seeds: int = 3):
+    """3.5 — GNNExplainer seed-stability (is the explanation trustworthy?)."""
+    from explain_gnn import gnn_stability
+    s = svc()
+    try:
+        node = s.ward_to_node(ward_id)
+    except ValueError:
+        raise HTTPException(404, f"ward {ward_id} not found")
+    return gnn_stability(s.ctx, node, _resolve_t(time_index), seeds=seeds)
+
+
+@app.get("/kg")
+def knowledge_graph_view():
+    """The knowledge graph as display-ready nodes + links (6.3)."""
+    from advisor.kg.knowledge_graph import get_knowledge_graph
+    kg = get_knowledge_graph().g
+    nodes, links = [], []
+    for n, d in kg.nodes(data=True):
+        nt = d.get("ntype", "other")
+        label = d.get("title", n) if nt == "policy" else str(n)
+        nodes.append({"id": str(n), "type": nt, "label": label[:32]})
+    for u, v, d in kg.edges(data=True):
+        links.append({"source": str(u), "target": str(v), "relation": d.get("relation", "")})
+    return {"nodes": nodes, "links": links,
+            "node_types": sorted({d.get("ntype", "other") for _, d in kg.nodes(data=True)})}
 
 
 @app.get("/reference")
@@ -196,16 +252,27 @@ def map_layer(time_index: int | None = Query(None)):
 
 
 @app.get("/forecast")
-def forecast(ward_id: str, time_index: int | None = None):
+def forecast(ward_id: str, time_index: int | None = None, horizon: int = 24):
     s = svc()
     try:
         node = s.ward_to_node(ward_id)
     except ValueError:
         raise HTTPException(404, f"ward {ward_id} not found")
     t = _resolve_t(time_index)
-    fc = s.forecast(node, t)
+    fc = s.forecast(node, t, horizon=horizon)
     return {**fc.as_dict(), "ward_id": ward_id, "time": str(fc.time),
+            "available_horizons": s.available_horizons(),
             "history": s.history(node, t, hours=48)}
+
+
+@app.get("/windrose")
+def windrose(ward_id: str, time_index: int | None = None, hours: int = 48):
+    s = svc()
+    try:
+        node = s.ward_to_node(ward_id)
+    except ValueError:
+        raise HTTPException(404, f"ward {ward_id} not found")
+    return s.wind_rose(node, _resolve_t(time_index), hours=hours)
 
 
 @app.get("/context")
@@ -232,12 +299,13 @@ class CFRequest(BaseModel):
     actions: list[str] = []
     feature_multipliers: dict[str, float] | None = None
     intensity: float = 1.0
+    spillover: bool = False               # 9.2 — also affect neighbouring wards
     time_index: int | None = None
 
 
 @app.post("/counterfactual")
 def counterfactual(req: CFRequest):
-    from advisor.simulation.counterfactual import CounterfactualSimulator
+    from advisor.simulation.counterfactual import CounterfactualSimulator, _scaled_multipliers
     s = svc()
     try:
         node = s.ward_to_node(req.ward_id)
@@ -245,11 +313,8 @@ def counterfactual(req: CFRequest):
         raise HTTPException(404, f"ward {req.ward_id} not found")
     t = _resolve_t(req.time_index)
     sim = CounterfactualSimulator(s)
-    if req.feature_multipliers:
-        res = sim.simulate_raw(node, t, req.feature_multipliers)
-    else:
-        res = sim.simulate_actions(node, t, req.actions, intensity=req.intensity)
-    return res.as_dict()
+    mults = req.feature_multipliers or _scaled_multipliers(req.actions, req.intensity)
+    return sim.simulate_raw(node, t, mults, spillover=req.spillover).as_dict()
 
 
 @app.get("/", response_class=HTMLResponse)

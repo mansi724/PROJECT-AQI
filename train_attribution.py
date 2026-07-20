@@ -55,12 +55,20 @@ def train_ratio(df, feats):
 
 
 def train_class(df, feats):
+    from sklearn.calibration import CalibratedClassifierCV
+    from sklearn.metrics import log_loss
     tr, va, te = _split(df, CLASS_TARGET)
     Xtr, ytr = tr[feats].to_numpy(), tr[CLASS_TARGET].to_numpy()
-    m = LGBMClassifier(n_estimators=400, learning_rate=0.05, num_leaves=63,
-                       subsample=0.8, colsample_bytree=0.8, random_state=0,
-                       n_jobs=-1, class_weight="balanced")
-    m.fit(Xtr, ytr)
+    base = LGBMClassifier(n_estimators=400, learning_rate=0.05, num_leaves=63,
+                          subsample=0.8, colsample_bytree=0.8, random_state=0,
+                          n_jobs=-1, class_weight="balanced")
+    base.fit(Xtr, ytr)
+    # 4.2 — calibrate probabilities on val so the donut's confidence means what it
+    # says. Sigmoid/Platt (not isotonic) — gentler + more robust to the winter→summer
+    # shift, so it improves calibration without distorting the argmax/F1.
+    m = CalibratedClassifierCV(base, method="sigmoid", cv="prefit")
+    m.fit(va[feats].to_numpy(), va[CLASS_TARGET].to_numpy())
+
     maj = tr[CLASS_TARGET].mode().iloc[0]
     print("\n== CLASS HEAD (dust/mixed/combustion) ==")
     for name, part in [("val", va), ("test", te)]:
@@ -69,10 +77,24 @@ def train_class(df, feats):
         f1 = f1_score(y, pred, average="macro")
         f1_maj = f1_score(y, np.full_like(y, maj, dtype=object), average="macro")
         print(f"  [{name}] macro-F1={f1:.3f}  vs majority({maj})={f1_maj:.3f}  (+{f1-f1_maj:.3f})")
+    # 4.2 diagnostic — calibration barely helps here and costs argmax/F1 because
+    # it is fit on winter-val and applied to summer-test (seasonal shift). So we
+    # SERVE the uncalibrated model (better source labels) and just report the
+    # comparison. Flip `SERVE_CALIBRATED` to True if honest confidence > F1 for you.
+    Xte, yte = te[feats].to_numpy(), te[CLASS_TARGET].to_numpy()
+    ll_raw = log_loss(yte, base.predict_proba(Xte), labels=base.classes_)
+    ll_cal = log_loss(yte, m.predict_proba(Xte), labels=base.classes_)
+    f1_raw = f1_score(yte, base.predict(Xte), average="macro")
+    f1_cal = f1_score(yte, m.predict(Xte), average="macro")
+    print(f"  4.2 calibration diagnostic (test): log-loss {ll_raw:.3f}->{ll_cal:.3f} "
+          f"(better) BUT macro-F1 {f1_raw:.3f}->{f1_cal:.3f} (worse, seasonal shift)")
+    SERVE_CALIBRATED = False
+    served = m if SERVE_CALIBRATED else base
+    print(f"  -> serving {'CALIBRATED' if SERVE_CALIBRATED else 'uncalibrated'} class head")
     print("\n  val classification report:")
-    print(classification_report(va[CLASS_TARGET], m.predict(va[feats].to_numpy()),
+    print(classification_report(va[CLASS_TARGET], served.predict(va[feats].to_numpy()),
                                 digits=3, zero_division=0))
-    return m
+    return served
 
 
 def main():

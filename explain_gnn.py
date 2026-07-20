@@ -225,6 +225,26 @@ def gnn_explain_ward(ctx: ExplainContext, node: int, t: int, epochs: int = 200):
     return edges_df, feat_df
 
 
+def gnn_stability(ctx: ExplainContext, node: int, t: int, seeds: int = 3,
+                  top: int = 5, epochs: int = 100) -> dict:
+    """3.5 — run GNNExplainer with several seeds and report how consistent the
+    top-neighbour set is (mean pairwise Jaccard). High agreement = trustworthy
+    explanation; low = the explanation is seed-sensitive, treat with caution."""
+    import itertools
+    sets = []
+    for s in range(seeds):
+        torch.manual_seed(s)
+        edges_df, _ = gnn_explain_ward(ctx, node, t, epochs=epochs)
+        sets.append(set(edges_df.head(top)["neighbour_ward"].astype(str)))
+    jac = []
+    for a, b in itertools.combinations(sets, 2):
+        u = a | b
+        jac.append(len(a & b) / len(u) if u else 1.0)
+    agree = float(np.mean(jac)) if jac else 1.0
+    return {"seeds": seeds, "top": top, "top_neighbour_agreement": round(agree, 3),
+            "verdict": "stable" if agree >= 0.6 else "seed-sensitive"}
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--horizon", type=int, default=24)

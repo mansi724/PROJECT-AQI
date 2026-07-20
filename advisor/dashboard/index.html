@@ -137,6 +137,7 @@ input.search:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgb
   <div class="navtools">
     <input class="search" id="search" list="wardlist" placeholder="Search ward…"/><datalist id="wardlist"></datalist>
     <button class="ico-btn" id="cmp" title="Compare wards"><i data-lucide="git-compare" style="width:17px"></i></button>
+    <button class="ico-btn" id="kgBtn" title="Knowledge graph"><i data-lucide="network" style="width:17px"></i></button>
     <button class="ico-btn" onclick="window.print()" title="Export report"><i data-lucide="download" style="width:17px"></i></button>
     <button class="ico-btn" id="notif" title="Alerts"><i data-lucide="bell" style="width:17px"></i><span class="badge" id="notifN">0</span></button>
     <button class="ico-btn" id="theme" title="Theme"><i data-lucide="sun" style="width:17px"></i></button>
@@ -157,7 +158,8 @@ input.search:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgb
         </div>
       </div>
       <div class="legend glass" id="legend"></div>
-      <div class="timebar glass"><i data-lucide="clock" style="width:15px"></i>
+      <div class="timebar glass">
+        <button class="ico-btn" id="playBtn" title="Animate AQI over time" style="width:30px;height:30px"><i data-lucide="play" style="width:15px"></i></button>
         <input type="range" id="tslider" min="0" max="100" value="100"/>
         <span id="tlabel" style="min-width:132px;text-align:right;color:var(--txt)">—</span></div>
     </div>
@@ -165,6 +167,18 @@ input.search:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgb
       <div class="panel glass empty"><span class="spin"></span> Initialising command center…<br/>
         Select a ward on the map to open the decision panel: forecast, explainability, source attribution, scenario simulation and policy intelligence.</div>
     </div>
+  </div>
+</div>
+
+<div id="kgOverlay" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(6,10,18,.82);backdrop-filter:blur(6px)">
+  <div class="glass" style="position:absolute;inset:36px;border-radius:16px;display:flex;flex-direction:column">
+    <div style="display:flex;align-items:center;gap:12px;padding:14px 18px;border-bottom:1px solid var(--line)">
+      <i data-lucide="network" style="width:18px;color:var(--acc)"></i>
+      <b>Air-Quality Knowledge Graph</b>
+      <span class="muted" id="kgLegend" style="margin-left:8px"></span>
+      <button class="ico-btn" style="margin-left:auto" onclick="document.getElementById('kgOverlay').style.display='none'"><i data-lucide="x" style="width:17px"></i></button>
+    </div>
+    <div id="kgChart" style="flex:1"></div>
   </div>
 </div>
 
@@ -195,6 +209,8 @@ async function init(){
   document.getElementById('search').addEventListener('change',e=>{
     const w=LAYERS.find(x=>x.ward_name.toUpperCase()===e.target.value.toUpperCase());if(w)selectWard(w.ward_id);});
   document.getElementById('theme').onclick=toggleTheme;
+  document.getElementById('playBtn').onclick=togglePlay;
+  document.getElementById('kgBtn').onclick=showKG;
   document.getElementById('reset').onclick=()=>map.setView([28.63,77.11],10.4);
   document.getElementById('fs').onclick=()=>{const el=document.querySelector('.mapcard');(el.requestFullscreen||el.webkitRequestFullscreen).call(el);setTimeout(()=>map.invalidateSize(),300);};
   document.getElementById('cmp').onclick=()=>{cmpMode=!cmpMode;cmpFirst=null;document.getElementById('cmp').style.color=cmpMode?'var(--acc)':'';
@@ -352,6 +368,8 @@ function renderWard(id,a){
       <div id="trend" style="height:200px"></div></div>`;
   // source donut
   h+=`<div class="panel glass"><h3><i data-lucide="pie-chart" class="spark-ico" style="width:15px"></i>Source attribution</h3><div id="donut" style="height:210px"></div></div>`;
+  h+=`<div class="panel glass"><h3><i data-lucide="radar" class="spark-ico" style="width:15px"></i>Pollutants vs WHO guideline (× limit)</h3><div id="radar" style="height:250px"></div></div>`;
+  h+=`<div class="panel glass"><h3><i data-lucide="wind" class="spark-ico" style="width:15px"></i>Wind rose (last 48 h)</h3><div id="windrose" style="height:250px" class="muted">loading…</div></div>`;
   // SHAP + GNN
   h+=`<div class="panel glass"><h3><i data-lucide="brain" class="spark-ico" style="width:15px"></i>Explainability (SHAP)</h3>
       <div id="shapWrap"><button class="btn" onclick="loadExplain('${id}')"><i data-lucide="sparkles" style="width:15px"></i> Compute feature attribution</button></div></div>`;
@@ -369,10 +387,23 @@ function renderWard(id,a){
   document.querySelectorAll('#hzTabs button').forEach(bt=>bt.onclick=()=>{document.querySelectorAll('#hzTabs button').forEach(x=>x.classList.toggle('on',x===bt));drawForecast(id,c,b,+bt.dataset.h);});
   // donut (ECharts)
   drawDonut(c);
+  drawRadar(c);
+  drawWindRose(id);
   // scenario wiring
   wireScenario(id,aqi,c);
   // recs
-  document.getElementById('recs').innerHTML=(a.ranked_actions||[]).length?a.ranked_actions.map((r,i)=>recCard(r,i)).join(''):'<div class="muted">No standard interventions apply at this AQI level.</div>';
+  let recsHtml=(a.ranked_actions||[]).length?a.ranked_actions.map((r,i)=>recCard(r,i)).join(''):'<div class="muted">No standard interventions apply at this AQI level.</div>';
+  // 8.4 — show what the policy engine FILTERED OUT and why (safety layer visible)
+  const rej=(a.validation&&a.validation.rejected)||[];
+  if(rej.length){
+    recsHtml+=`<div style="margin-top:10px;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px">
+      <i data-lucide="shield-x" style="width:13px;vertical-align:-2px"></i> Rejected by policy engine (${rej.length})</div>`+
+      rej.map(r=>`<div class="rec" style="border-left-color:var(--bad);opacity:.75">
+        <div class="r-top"><b style="text-decoration:line-through">${(r.title||r.action)}</b>
+        <span class="prio" style="background:var(--bad);color:#04121f">REJECTED</span></div>
+        <div class="muted" style="margin-top:5px;font-size:11.5px">✕ ${((r._validation||{}).reasons||[]).join('; ')}</div></div>`).join('');
+  }
+  document.getElementById('recs').innerHTML=recsHtml;
   ico();
   // policy
   document.getElementById('pol').innerHTML=(a.retrieved_policies||[]).map(p=>`
@@ -394,15 +425,22 @@ function recCard(r,i){const p=i===0?['CRITICAL','var(--bad)']:i===1?['HIGH','var
 
 /* ---------- charts ---------- */
 function drawForecast(id,c,b,hz){
-  Plotly.purge('trend');
-  j('/forecast?ward_id='+encodeURIComponent(id)+'&time_index='+tIndex).then(fc=>{
-    const H=fc.history||[],x=H.map(p=>p.time),y=H.map(p=>p.aqi),pt=c.timestamp,lastx=x[x.length-1]||pt;
-    const scale=hz?hz/24:1,after=c.predicted_aqi;
+  hz=hz||24; Plotly.purge('trend');
+  j('/forecast?ward_id='+encodeURIComponent(id)+'&time_index='+tIndex+'&horizon='+hz).then(fc=>{
+    const H=fc.history||[],x=H.map(p=>p.time),y=H.map(p=>p.aqi);
+    const after=fc.predicted_aqi,lo=fc.aqi_low,hi=fc.aqi_high,bb=band(after);
+    // mark real vs fallback horizons (grey a tab whose model isn't loaded)
+    const avail=fc.available_horizons||[24];
+    document.querySelectorAll('#hzTabs button').forEach(bt=>bt.style.opacity=avail.includes(+bt.dataset.h)?'1':'0.4');
+    // forecast time = input time + hz hours
+    const t0=new Date((c.timestamp||'').replace(' ','T'));
+    const fts=new Date(t0.getTime()+hz*3600*1000).toISOString().slice(0,19).replace('T',' ');
+    const lastx=x[x.length-1]||c.timestamp,lasty=y.length?y[y.length-1]:after;
     Plotly.newPlot('trend',[
-      {x:[lastx,pt,pt,lastx],y:[c.aqi_low,c.aqi_low,c.aqi_high,c.aqi_high],fill:'toself',mode:'none',fillcolor:hexa(b.color,.16),hoverinfo:'skip',name:'p10–p90'},
+      {x:[lastx,fts,fts,lastx],y:[lo,lo,hi,hi],fill:'toself',mode:'none',fillcolor:hexa(bb.color,.16),hoverinfo:'skip',name:'p10–p90'},
       {x,y,mode:'lines',line:{color:var2('--acc'),width:2.2,shape:'spline'},name:'observed'},
-      {x:[lastx,pt],y:[y[y.length-1]||after,after],mode:'lines',line:{color:b.color,width:2,dash:'dot'},name:'forecast'},
-      {x:[pt],y:[after],mode:'markers',marker:{color:b.color,size:12,line:{color:'#fff',width:1.5}},name:'+'+(hz||24)+'h'},
+      {x:[lastx,fts],y:[lasty,after],mode:'lines',line:{color:bb.color,width:2,dash:'dot'},name:'forecast'},
+      {x:[fts],y:[after],mode:'markers',marker:{color:bb.color,size:12,line:{color:'#fff',width:1.5}},name:'+'+hz+'h ('+after+')'},
     ],lay('AQI'),cfg());
   });
 }
@@ -413,6 +451,42 @@ function drawDonut(c){
     series:[{type:'pie',radius:['52%','78%'],avoidLabelOverlap:true,padAngle:2,itemStyle:{borderRadius:6,borderColor:var2('--surface'),borderWidth:2},
       label:{color:var2('--txt'),fontSize:11,formatter:'{b}\n{d}%'},data,animationDuration:700}],
     graphic:{type:'text',left:'center',top:'center',style:{text:Math.round(c.source_confidence*100)+'%\nconf.',fill:var2('--mut'),fontSize:13,textAlign:'center'}}});
+  window.addEventListener('resize',()=>el.resize());
+}
+function drawRadar(c){
+  const el=echarts.init(document.getElementById('radar'));
+  const lim=REF.who_limits||{}, P=c.pollutants||{};
+  const labels={pm2_5:'PM2.5',pm10:'PM10',nitrogen_dioxide:'NO₂',sulphur_dioxide:'SO₂',ozone:'O₃',carbon_monoxide:'CO'};
+  const keys=Object.keys(labels).filter(k=>lim[k]&&P[k]!=null);
+  const ratios=keys.map(k=>+(P[k]/lim[k]).toFixed(1));
+  const maxR=Math.max(3,Math.ceil(Math.max(...ratios)));
+  const worst=Math.max(...ratios);
+  const col=worst>3?'#ff5c5c':worst>1?'#ffb020':'#26c281';
+  el.setOption({
+    tooltip:{formatter:o=>keys.map((k,i)=>`${labels[k]}: ${ratios[i]}× (${P[k]})`).join('<br>')},
+    radar:{indicator:keys.map(k=>({name:labels[k],max:maxR})),radius:'62%',
+      axisName:{color:var2('--mut'),fontSize:11},splitLine:{lineStyle:{color:var2('--line')}},
+      splitArea:{areaStyle:{color:['rgba(255,255,255,0.02)','rgba(255,255,255,0.05)']}},
+      axisLine:{lineStyle:{color:var2('--line')}}},
+    series:[{type:'radar',data:[{value:ratios,name:'× WHO limit',
+      areaStyle:{color:hexa(col,.25)},lineStyle:{color:col,width:2},itemStyle:{color:col}}],animationDuration:700}]});
+  window.addEventListener('resize',()=>el.resize());
+}
+async function drawWindRose(id){
+  const box=document.getElementById('windrose');
+  let wr; try{wr=await j('/windrose?ward_id='+encodeURIComponent(id)+'&time_index='+tIndex);}
+  catch(e){box.textContent='wind rose unavailable';return;}
+  box.classList.remove('muted');box.textContent='';
+  const el=echarts.init(box);
+  const dirs=wr.directions, speeds=wr.speed_bins, mat=wr.matrix; // matrix[speedBin][dir]
+  const palette=['#0d3b66','#1466a3','#2f9e44','#f6c000','#e03131'];
+  const series=speeds.map((sp,si)=>({name:sp,type:'bar',coordinateSystem:'polar',stack:'w',
+    itemStyle:{color:palette[si%palette.length]},data:mat[si]}));
+  el.setOption({
+    tooltip:{},legend:{data:speeds,bottom:0,textStyle:{color:var2('--mut'),fontSize:9},itemWidth:10,itemHeight:8},
+    angleAxis:{type:'category',data:dirs,axisLine:{lineStyle:{color:var2('--line')}},axisLabel:{color:var2('--mut'),fontSize:10}},
+    radiusAxis:{axisLine:{show:false},splitLine:{lineStyle:{color:var2('--line')}},axisLabel:{color:var2('--mut'),fontSize:9}},
+    polar:{radius:'62%'},series});
   window.addEventListener('resize',()=>el.resize());
 }
 async function loadExplain(id){
@@ -505,6 +579,46 @@ function cfg(){return{displayModeBar:false,responsive:true};}
 function toggleTheme(){const h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark';
   document.querySelector('#theme i').setAttribute('data-lucide',h.dataset.theme==='dark'?'sun':'moon');ico();
   if(curWard)selectWard(curWard);restyle();}
+
+const KG_COLORS={source:'#3987e5',pollutant:'#d55181',aqi_stage:'#f6c000',intervention:'#199e70',weather:'#9085e9',policy:'#e66767',other:'#8899aa'};
+async function showKG(){
+  const ov=document.getElementById('kgOverlay');ov.style.display='block';
+  const kg=await j('/kg');
+  document.getElementById('kgLegend').innerHTML=kg.node_types.map(t=>`<span style="margin-right:10px"><i style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${KG_COLORS[t]||'#889'};margin-right:4px"></i>${t}</span>`).join('');
+  const chart=echarts.init(document.getElementById('kgChart'));
+  const cats=[...new Set(kg.nodes.map(n=>n.type))].map(t=>({name:t,itemStyle:{color:KG_COLORS[t]||'#889'}}));
+  const catIdx=Object.fromEntries(cats.map((c,i)=>[c.name,i]));
+  const nodes=kg.nodes.map(n=>({id:n.id,name:n.label,category:catIdx[n.type],
+    symbolSize:n.type==='policy'?26:n.type==='intervention'?20:16,
+    label:{show:n.type!=='policy'},itemStyle:{color:KG_COLORS[n.type]||'#889'}}));
+  const links=kg.links.map(l=>({source:l.source,target:l.target,value:l.relation,
+    label:{show:false,formatter:l.relation}}));
+  chart.setOption({
+    tooltip:{formatter:o=>o.dataType==='edge'?`${o.data.source} —[${o.value}]→ ${o.data.target}`:o.name},
+    legend:[{data:cats.map(c=>c.name),show:false}],
+    series:[{type:'graph',layout:'force',roam:true,draggable:true,categories:cats,
+      force:{repulsion:260,edgeLength:[60,140],gravity:.08},
+      data:nodes,links:links,
+      lineStyle:{color:'source',opacity:.45,curveness:.08,width:1.2},
+      label:{color:var2('--txt'),fontSize:10,position:'right'},
+      emphasis:{focus:'adjacency',lineStyle:{width:3}},animationDuration:900}]});
+  setTimeout(()=>chart.resize(),100);
+  window.addEventListener('resize',()=>chart.resize());
+}
+
+let _playTimer=null;
+function togglePlay(){
+  const btn=document.getElementById('playBtn'), sl=document.getElementById('tslider');
+  if(_playTimer){ clearInterval(_playTimer); _playTimer=null;
+    btn.querySelector('i').setAttribute('data-lucide','play'); ico(); return; }
+  btn.querySelector('i').setAttribute('data-lucide','pause'); ico();
+  const step=3;                                   // advance 3 h per frame
+  _playTimer=setInterval(async()=>{
+    let next=+sl.value+step;
+    if(next>+sl.max){ next=Math.max(0,+sl.max-72); }   // loop back ~3 days
+    sl.value=next; await loadLayers(next);
+  }, 700);
+}
 init();
 </script>
 </body>

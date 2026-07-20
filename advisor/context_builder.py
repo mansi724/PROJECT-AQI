@@ -85,11 +85,11 @@ class ContextBuilder:
         explanations = {}
         if include_explanations:
             explanations = {
-                "top_feature_drivers": self.svc.shap_local(node_idx, t, top=8),
-                "influential_neighbours": self.svc.gnn_neighbours(node_idx, t, top=5),
+                **self.svc.explanations(node_idx, t),          # 3.1 cached SHAP + GNNExplainer
                 "dominant_class": prof.get("dominant_class"),
                 "class_probs": {k: round(v, 3) for k, v in prof.get("class_probs", {}).items()},
                 "predicted_pm25_pm10_ratio": round(prof.get("pred_pm25_pm10_ratio", float("nan")), 3),
+                "source_uncertainty": prof.get("uncertainty"),  # 4.4
             }
 
         return WardContext(

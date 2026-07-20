@@ -28,10 +28,16 @@ class CounterfactualResult:
     delta: float
     improvement_pct: float
     applied_features: dict
+    before_band: list = None          # 9.4 p10–p90
+    after_band: list = None
+    spillover: bool = False           # 9.2
+    n_wards_affected: int = 1
 
     def as_dict(self):
         return {"aqi_before": self.aqi_before, "aqi_after": self.aqi_after,
                 "delta": self.delta, "improvement_pct": round(self.improvement_pct, 1),
+                "before_band": self.before_band, "after_band": self.after_band,
+                "spillover": self.spillover, "n_wards_affected": self.n_wards_affected,
                 "applied_features": self.applied_features}
 
 
@@ -62,17 +68,21 @@ class CounterfactualSimulator:
         mults = _scaled_multipliers(action_ids, intensity)
         return self._run(node_idx, t, mults)
 
-    def simulate_raw(self, node_idx: int, t: int, feature_multipliers: dict) -> CounterfactualResult:
+    def simulate_raw(self, node_idx: int, t: int, feature_multipliers: dict,
+                     spillover: bool = False) -> CounterfactualResult:
         """Explicit raw-feature what-if, e.g. {'nitrogen_dioxide': 0.62/0.83}."""
-        return self._run(node_idx, t, feature_multipliers)
+        return self._run(node_idx, t, feature_multipliers, spillover)
 
-    def _run(self, node_idx: int, t: int, mults: dict) -> CounterfactualResult:
-        cf = self.svc.counterfactual(node_idx, t, mults)
+    def _run(self, node_idx: int, t: int, mults: dict, spillover: bool = False) -> CounterfactualResult:
+        cf = self.svc.counterfactual(node_idx, t, mults, spillover=spillover)
         before, after = cf["aqi_before"], cf["aqi_after"]
         imp = 100.0 * (before - after) / before if before else 0.0
         return CounterfactualResult(aqi_before=before, aqi_after=after,
                                     delta=cf["delta"], improvement_pct=imp,
-                                    applied_features=cf["applied_features"])
+                                    applied_features=cf["applied_features"],
+                                    before_band=cf.get("before_band"), after_band=cf.get("after_band"),
+                                    spillover=cf.get("spillover", False),
+                                    n_wards_affected=cf.get("n_wards_affected", 1))
 
     def rank_actions_by_effect(self, node_idx: int, t: int, action_ids: list,
                                intensity: float = 1.0) -> list[dict]:

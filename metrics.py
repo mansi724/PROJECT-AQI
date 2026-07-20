@@ -68,6 +68,35 @@ def pinball_loss(y_true, y_pred, q: float) -> float:
     return float(np.mean(np.maximum(q * e, (q - 1) * e)))
 
 
+def crps_from_quantiles(y_true, q_preds, levels) -> float:
+    """CRPS estimate from a set of predicted quantiles (improvement 2.8/2.10).
+
+    A proper scoring rule for the WHOLE predictive distribution (lower = better),
+    approximated as 2·mean pinball loss across the quantile levels. With just
+    3 quantiles it's coarse but valid and comparable across models.
+    """
+    y = np.asarray(y_true, dtype=float).reshape(-1, 1)
+    q = np.asarray(q_preds, dtype=float)
+    lv = np.asarray(levels, dtype=float).reshape(1, -1)
+    m = np.isfinite(y).ravel() & np.isfinite(q).all(axis=1)
+    e = y[m] - q[m]
+    pin = np.maximum(lv * e, (lv - 1) * e)
+    return float(2.0 * pin.mean())
+
+
+def pit_calibration(y_true, q_preds, levels) -> dict:
+    """Reliability check (PIT): empirical P(y <= q_level) should equal `level`.
+
+    Returns {level: empirical_coverage}. A well-calibrated forecast matches the
+    diagonal (e.g. ~10% of truths fall below the p10 prediction).
+    """
+    y = np.asarray(y_true, dtype=float).reshape(-1, 1)
+    q = np.asarray(q_preds, dtype=float)
+    m = np.isfinite(y).ravel() & np.isfinite(q).all(axis=1)
+    emp = (y[m] <= q[m]).mean(axis=0)
+    return {round(float(l), 2): round(float(e), 3) for l, e in zip(levels, emp)}
+
+
 def interval_coverage(y_true, y_lo, y_hi) -> float:
     """Fraction of truths inside [lo, hi]. For a 0.1/0.9 band, target ~0.80."""
     y_true = np.asarray(y_true, dtype=float)

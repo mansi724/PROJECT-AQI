@@ -20,6 +20,7 @@ from functools import lru_cache
 from advisor.config import CONFIG
 from advisor.embeddings.vector_store import get_vector_store
 from advisor.retrieval.bm25 import get_bm25
+from advisor.retrieval.expand import expand_query
 from advisor.kg.knowledge_graph import get_knowledge_graph
 
 
@@ -76,9 +77,11 @@ class HybridRetriever:
         sem_raw = {}
         for r in self.vs.query(ctx.query, top_k=top_k):
             remember(r); sem_raw[r["chunk_id"]] = r["score"]
-        # 2. bm25
+        # 2. bm25 — on the domain-EXPANDED query (5.6). Semantic keeps the
+        #    original query (embeddings already capture meaning).
+        bm_query = expand_query(ctx.query) if getattr(self.cfg, "query_expansion", True) else ctx.query
         bm_raw = {}
-        for r in self.bm25.query(ctx.query, top_k=top_k):
+        for r in self.bm25.query(bm_query, top_k=top_k):
             remember(r); bm_raw[r["chunk_id"]] = r["score"]
         # 4. knowledge-graph policy boost -> doc_ids
         kg_docs = {p["doc_id"]: p["weight"] for p in

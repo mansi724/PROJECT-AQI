@@ -55,12 +55,12 @@ pip install -r requirements.txt
 ```
 
 ### Configure the LLM (cloud only — no Ollama/local)
-Add to `.env` (default provider is **Groq**, model **gemma2-9b-it**):
+Add to `.env` (default provider is **Groq**, model **llama-3.3-70b-versatile**):
 ```
 GROQ_API_KEY=your_groq_key
 # optional overrides:
 # ADVISOR_LLM_PROVIDER=groq        # groq | anthropic | gemini | mock
-# ADVISOR_LLM_MODEL=gemma2-9b-it
+# ADVISOR_LLM_MODEL=llama-3.3-70b-versatile
 # ANTHROPIC_API_KEY=...            # if provider=anthropic
 # GEMINI_API_KEY=...               # if provider=gemini
 ```

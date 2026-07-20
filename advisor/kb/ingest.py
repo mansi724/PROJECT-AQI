@@ -218,6 +218,7 @@ class Ingestor:
                 cmeta = meta.as_dict()
                 cmeta["section"] = section
                 cmeta["source_file"] = path.name
+                cmeta["char_start"] = body.find(text)   # 5.9: deep-link anchor into the source
                 ch = Chunk(chunk_id=cid, doc_id=meta.doc_id, text=text, position=pos,
                            metadata=cmeta, citation=meta.citation(), section=section)
                 h = ch.content_hash()

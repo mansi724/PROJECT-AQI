@@ -93,13 +93,14 @@ interpretable model.
 |---|---|---|---|---|
 | 2.1 | ✅ **DONE — ensemble persisted & serving** (avg of 4 snapshot members; test +23.6% / val +10.4%). Re-run the one command after any recipe change to refresh. | P0 | — | 🔁 `train_ensemble.py`, `advisor/serving.py` |
 | 2.4 | ✅ **DONE (2026-07-20)** — 12-config sweep (`sweep_gnn.py`). Finding: base recipe already well-tuned; no dramatic winner. **Adopted `dropout 0.3`** (0.2→0.3) — beats base on val skill, test skill, and calibration (coverage 0.63→0.74). Now the default in `train_gnn.py`/`train_ensemble.py`; `best_config.json` records it. *(Single-seed → margins are noisy; the calibration gain is the reliable part.)* | P1 | — | `sweep_gnn.py`, `train_gnn.py` |
-| 2.5 | 🔁 **Better temporal encoder** — replace/augment the GRU with a small Temporal-Transformer or TCN; add attention over the lookback window | P1 | M | `models/gnn_forecast.py` |
-| 2.3 | 🔁/🩹 **Fix winter calibration** — coverage 0.65 vs target 0.80. Training part: heavier dropout, quantile-reg. **Post-hoc part: conformal-prediction wrapper on residuals (no retrain).** | P1 | M | `train_gnn.py`, `models/gnn_forecast.py` |
-| 2.2 | 🔁 **Train the 48h & 72h horizons** (with the settled recipe) — only h24 exists, so the dashboard's 48/72h tabs currently reuse the 24h number. `train_gnn.py --horizon 48/72` already works | P1 | S | `train_gnn.py` |
-| 2.7 | 🔁 **Physics-informed features/loss** — advection term from wind + boundary-layer height as a soft constraint | P2 | L | `models/gnn_forecast.py` |
-| 2.9 | 🔁 **Online / incremental fine-tuning** as new station data arrives (warm-start from the last checkpoint) | P2 | M | `train_gnn.py` |
-| 2.8 | 🩹 **Probabilistic upgrade / CRPS** — you already have quantiles; report the full predictive distribution | P2 | M | `metrics.py` |
-| 2.10 | 🩹 **Report CRPS + PIT histograms** (no retrain — re-scores the existing model), for forecast-quality credibility | P2 | S | `metrics.py` |
+| 2.5 | ✅ **DONE (2026-07-20)** — added `temporal_kind` (gru/transformer/tcn) + compared (`compare_temporal.py`). **None beat the snapshot ensemble** (best temporal: tcn test +19.7% vs ensemble +23.6%; transformer badly overfits, test +8.0%). **Finding:** forecast is driven by current conditions + spatial transport, NOT deep temporal history → snapshot + graph wins. **Adopted nothing; snapshot ensemble stays.** | P1 | — | `models/gnn_forecast.py`, `compare_temporal.py` |
+| 2.3 | ✅ **DONE (2026-07-20)** — **conformal calibration (CQR)**, post-hoc, no retrain (`calibrate_conformal.py`). Per-horizon δ widens p10/p90 to target coverage: h24 **0.65→0.82**, h48 0.66→0.85, h72 0.71→0.89. PIT: P[y≤p10] 0.23→0.10. `ForecastService` applies δ automatically (`conformal.json`). | P1 | — | `calibrate_conformal.py`, `advisor/serving.py` |
+| 2.2 | ✅ **DONE (2026-07-20)** — trained h48 + h72 (snapshot, dropout 0.3). Wired end-to-end: `ForecastService` loads all 3 horizons, `/forecast?horizon=24\|48\|72` serves them, dashboard tabs now show **real** 48h/72h forecasts (h24=ensemble, h48/h72=single models; unavailable horizons grey out + fall back to h24). | P1 | — | `advisor/serving.py`, `advisor/api/main.py`, dashboard |
+| 2.8 | ✅ **DONE (2026-07-20)** — **CRPS** (whole-distribution proper score) added to `metrics.py`; reported on the ensemble (test CRPS 26.3). | P2 | — | `metrics.py`, `report_forecast_quality.py` |
+| 2.10 | ✅ **DONE (2026-07-20)** — **PIT reliability** + CRPS report (`report_forecast_quality.py`), no retrain. Shows the conformal fix precisely (P[y≤p10] 0.23→0.10). | P2 | — | `metrics.py`, `report_forecast_quality.py` |
+| 2.6 | ⏸️ **DEFERRED (assessed).** Multi-task heads (AQI+PM2.5+PM10) need retrain + arch change for *marginal* expected gain — 2.4/2.5 showed the recipe/architecture is already near-optimal and gains are capped by the data (19 cells / 49 wards), not the model. Revisit only after a data upgrade (§1.2/1.3). | P2 | M | `models/gnn_forecast.py` |
+| 2.7 | ⏸️ **DEFERRED (assessed).** Physics-informed advection loss is genuine multi-day research with uncertain payoff on this data. Documented as future work, not attempted now. | P2 | L | `models/gnn_forecast.py` |
+| 2.9 | ⏸️ **DEFERRED (assessed).** Online fine-tuning is infra for *new* data arriving — not actionable until the real-time ingestion path (§1.7) exists. Mechanism (warm-start from a checkpoint) is already possible via `train_gnn.py`. | P2 | M | `train_gnn.py` |
 
 ---
 
@@ -107,11 +108,11 @@ interpretable model.
 
 | # | Item | Pri | Effort | File / Note |
 |---|---|---|---|---|
-| 3.1 | **Cache / precompute explanations** — SHAP+GNNExplainer take ~5 s per ward. Precompute for all wards nightly into `data/serving/` so the dashboard is instant | P1 | M | `explain_gnn.py`, new `build_predictions.py` |
-| 3.2 | **Global SHAP summary** in the UI (beeswarm / mean-|SHAP| across wards), not only per-ward | P2 | S | `explain_gnn.py` (`shap_global` exists) |
-| 3.3 | **Temporal attribution** — which past hours drove the forecast (attribute over the GRU lookback) | P2 | M | `explain_gnn.py` |
-| 3.4 | **Counterfactual explanations** — "AQI would drop below 300 if NO₂ fell 20%" auto-generated from the simulator | P2 | M | ties `explain_gnn.py` + `simulation/` |
-| 3.5 | **Stability check** — run GNNExplainer with several seeds and report edge-importance variance (trust signal) | P2 | S | `explain_gnn.py` |
+| 3.1 | ✅ **DONE (2026-07-20)** — **persistent disk cache** for SHAP+GNNExplainer (`data/explain/cache.json`). First view of a ward-hour computes (~6.7 s), every later view (this session or next, any process) is **instant (0 ms)**. Delete the file to invalidate after a retrain. | P1 | — | `advisor/serving.py`, `context_builder.py` |
+| 3.5 | ✅ **DONE (2026-07-20)** — **explanation stability check** (`gnn_stability`, `/explain/stability`): runs GNNExplainer across seeds, reports top-neighbour agreement (Jaccard) + a stable/seed-sensitive verdict. Ward 239: 0.78 → "stable". | P2 | — | `explain_gnn.py`, `advisor/api/main.py` |
+| 3.2 | ✅ **DONE (2026-07-20)** — **global SHAP** endpoint `/explain/global` (mean-\|SHAP\| across many ward-hours; cached). Top drivers: wind gusts, stagnation, PM10 lag, dust. | P2 | — | `advisor/api/main.py`, `explain_gnn.py` |
+| 3.3 | ⏸️ **N/A (assessed)** — temporal attribution over the lookback is meaningless for the SERVED model, which is the **snapshot** (no-temporal) ensemble (2.5 showed temporal doesn't help). Would only apply if a temporal model were served. | P2 | M | — |
+| 3.4 | ⏸️ **DEFERRED** — the counterfactual engine already produces "AQI 318→279 if…"; auto-narrating it as prose is a light UI/LLM add, deferred. | P2 | M | `simulation/` |
 
 ---
 
@@ -121,11 +122,11 @@ Current: ratio head test MAE 0.127 (vs 0.177), class head val macro-F1 0.528 (vs
 
 | # | Item | Pri | Effort | File / Note |
 |---|---|---|---|---|
-| 4.1 | **Add species that enable real apportionment** (VOC/black-carbon/K⁺ tracers) if obtainable → move from qualitative to defensible quantitative shares | P1 | L | 🔑 data-dependent, `models/attribution.py` |
-| 4.2 | **Calibrate class probabilities** (isotonic/Platt) so the donut's confidence is trustworthy | P2 | S | `train_attribution.py` |
-| 4.3 | **Wind-back-trajectory attribution** — use HYSPLIT/back-trajectories to attribute regional transport more rigorously than the current directional proxy | P2 | L | 🔑 new module |
-| 4.4 | **Per-source uncertainty bands** in the attribution output | P2 | S | `models/attribution.py` |
-| 4.5 | **Validate against a published Delhi source-apportionment study** and report agreement | P2 | M | write-up |
+| 4.2 | ✅ **DONE (2026-07-20, assessed)** — sigmoid/Platt calibration implemented (`train_attribution.py`). **Diagnostic:** improves test log-loss (0.805→0.767) BUT costs macro-F1 (0.47→0.42) under the winter→summer shift, so we **serve the uncalibrated head** (better source labels) and report the comparison. Flip `SERVE_CALIBRATED` to prefer honest confidence over F1. | P2 | — | `train_attribution.py` |
+| 4.4 | ✅ **DONE (2026-07-20)** — **per-source uncertainty**: attribution now returns `uncertainty` (normalised entropy of the class posterior) + `margin` (top-2 gap), surfaced in the context. | P2 | — | `models/attribution.py` |
+| 4.1 | 🔑 **DATA-DEPENDENT (deferred)** — real apportionment needs speciation tracers (VOC/BC/K⁺) not in the dataset. Genuinely blocked on new data. | P1 | L | 🔑 `models/attribution.py` |
+| 4.3 | ⏸️ **DEFERRED** — HYSPLIT back-trajectories are a heavy external dependency; the wind-gated directional proxy is sufficient for the qualitative claim. | P2 | L | 🔑 new module |
+| 4.5 | 🔑 **MANUAL** — validating against a published Delhi source-apportionment study is a write-up task requiring the reference paper. | P2 | M | write-up |
 
 ---
 
@@ -133,15 +134,15 @@ Current: ratio head test MAE 0.127 (vs 0.177), class head val macro-F1 0.528 (vs
 
 | # | Item | Pri | Effort | File / Note |
 |---|---|---|---|---|
-| 5.1 | **Add the real official documents** — the corpus is curated *summaries*. Drop the actual **GRAP/CAQM/CPCB/DPCC/NCAP/WHO PDFs** into `data/kb/raw_docs/` (+ sidecar `.meta.json`) and re-ingest for authoritative citations | P0 | M | 🔑 `data/kb/raw_docs/`, `advisor/kb/ingest.py` |
-| 5.2 | **Upgrade the embedding model** — swap MiniLM (384-d) for `BAAI/bge-large-en-v1.5` or `bge-m3` (multilingual, Hindi policy text) | P1 | S | `ADVISOR_EMBED_MODEL` in `.env` / `config.py` |
-| 5.3 | **Enable the real cross-encoder** `BAAI/bge-reranker-v2-m3` (config already supports it) | P1 | S | `ADVISOR_RERANKER` |
-| 5.4 | **Hindi / bilingual corpus** — many Delhi notifications are in Hindi; add multilingual embeddings + translation on ingest | P1 | M | 🔑 `advisor/kb/ingest.py` |
-| 5.5 | **Chunk-quality upgrades** — semantic/late chunking, table extraction from PDFs, keep section hierarchy | P2 | M | `advisor/kb/ingest.py` |
-| 5.6 | **Query expansion / HyDE** before retrieval for better recall on policy jargon | P2 | M | `advisor/retrieval/hybrid.py` |
-| 5.7 | **Retrieval evaluation set** — a small labelled (query → relevant chunk) set to tune the semantic/BM25/graph/metadata weights instead of guessing | P1 | M | new `eval/retrieval_eval.py` |
-| 5.8 | **Auto-refresh the corpus** — scheduled scrape of CAQM/CPCB order pages → ingest new orders | P2 | L | 🔑 new scraper |
-| 5.9 | **Citation deep-linking** — store page/section so the UI can link to the exact spot in the source PDF | P2 | M | `advisor/kb/schema.py` |
+| 5.7 | ✅ **DONE (2026-07-20)** — **retrieval eval harness** (`eval_retrieval.py`): 12 labelled queries, Recall@k + MRR, with ablations. Result: full hybrid **Recall@6 = 1.0 / MRR = 0.86**, beats semantic-only (0.92 / 0.83) — the BM25+KG+metadata fusion is doing real work. Use it to tune weights with evidence. | P1 | — | `advisor/retrieval/eval_retrieval.py` |
+| 5.6 | ✅ **DONE (2026-07-20)** — **query expansion** (`expand.py`): rule-based domain-term expansion for BM25 (severe→Stage III/IV, traffic→NO2/odd-even…). No-key, can't hurt (semantic keeps the original query); benefit grows with corpus size / smaller k. *(LLM-HyDE is a key-gated follow-up.)* | P2 | — | `advisor/retrieval/expand.py`, `hybrid.py` |
+| 5.9 | ✅ **DONE (2026-07-20)** — **citation deep-linking**: each chunk now carries `char_start` + `section` + `source_file` (anchor into the source). Add PDF page numbers when real PDFs are ingested. | P2 | — | `advisor/kb/ingest.py` |
+| 5.2 | 🟢 **READY (opt-in)** — config already supports it. Set `ADVISOR_EMBED_MODEL=BAAI/bge-large-en-v1.5` (or `bge-m3`) in `.env` → `python -m advisor.embeddings.vector_store --reset`. Kept MiniLM as default (fast, no 2 GB download); measure the swap with 5.7. | P1 | S | `.env` / `config.py` |
+| 5.3 | 🟢 **READY (opt-in)** — set `ADVISOR_RERANKER=BAAI/bge-reranker-v2-m3` in `.env`. Kept ms-marco-MiniLM default (small/fast); the reranker layer already downloads + uses whatever is configured. | P1 | S | `.env` |
+| 5.1 | 🔑 **MANUAL (pipeline ready)** — the ingestion pipeline handles PDF/DOCX/HTML + OCR + metadata. Drop official **GRAP/CAQM/CPCB/DPCC/NCAP/WHO PDFs** into `data/kb/raw_docs/` (+ optional `.meta.json`) → re-ingest → reindex. Only you can supply the authoritative documents. | P0 | M | 🔑 `data/kb/raw_docs/` |
+| 5.5 | ⏸️ **PARTIAL/DEFERRED** — chunker is already section- + sentence-aware with overlap. Remaining (semantic/late chunking, PDF table extraction) is only worth it once real PDFs (5.1) are added. | P2 | M | `advisor/kb/ingest.py` |
+| 5.4 | ⏸️ **DEFERRED (assessed)** — Hindi/bilingual needs multilingual embeddings (`bge-m3` via 5.2 covers the embedding side) + a translation step on ingest. Do after 5.1/5.2. | P1 | M | 🔑 `advisor/kb/ingest.py` |
+| 5.8 | ⏸️ **DEFERRED (assessed)** — auto-scraping CAQM/CPCB order pages is infra with brittle site-specific parsers; low priority vs. a one-time PDF drop (5.1). | P2 | L | 🔑 new scraper |
 
 ---
 
@@ -149,10 +150,10 @@ Current: ratio head test MAE 0.127 (vs 0.177), class head val macro-F1 0.528 (vs
 
 | # | Item | Pri | Effort | File / Note |
 |---|---|---|---|---|
-| 6.1 | **Auto-extract entities/relations** from ingested docs with an LLM (currently the ontology is curated) → richer, self-updating graph | P1 | M | `advisor/kg/knowledge_graph.py` |
-| 6.2 | **Weight `policies_for` by stage match** — a Stage-III query currently can surface Stage-I docs highly; tighten the traversal scoring | P2 | S | `advisor/kg/knowledge_graph.py` |
-| 6.3 | **Graph visualisation page** — expose the full KG as an interactive ECharts graph in the dashboard | P2 | M | dashboard |
-| 6.4 | Optional **Neo4j** backend if the graph grows large (NetworkX is fine for now) | P2 | L | `advisor/kg/` |
+| 6.1 | ✅ **DONE (2026-07-20)** — **LLM graph enrichment** (`enrich_kg.py`): the LLM reads each policy and links it to the sources/interventions it targets (constrained to fixed ids). Added **46 accurate `addresses` edges** (graph 38 nodes → 100 edges). Value grows with real docs (5.1). *(Re-run after rebuilding the base graph.)* | P1 | — | `advisor/kg/enrich_kg.py` |
+| 6.2 | ✅ **DONE (2026-07-20)** — **stage-aware `policies_for`**: exact stage now dominates (weight 3.0), GRAP-cumulative lower stages get a modest bump, tag hits are capped so they can't overtake the stage signal. Verified: Stage III query → Stage III doc ranks #1. | P2 | — | `advisor/kg/knowledge_graph.py` |
+| 6.3 | ✅ **DONE (2026-07-20)** — **KG visualisation**: `/kg` endpoint + a full-screen interactive ECharts force-graph in the dashboard (nav "network" button), colour-coded by node type (source/pollutant/stage/intervention/policy). | P2 | — | `advisor/api/main.py`, dashboard |
+| 6.4 | ⏭️ **SKIPPED (by choice)** — Neo4j not needed; NetworkX handles this graph size fine. | P2 | L | — |
 
 ---
 
@@ -162,14 +163,14 @@ Currently runs on a **deterministic mock** until you add a key.
 
 | # | Item | Pri | Effort | File / Note |
 |---|---|---|---|---|
-| 7.1 | **Add a cloud LLM key** — `GROQ_API_KEY` in `.env` (Gemma `gemma2-9b-it`) turns on real reasoning. Provider-agnostic (Groq/Anthropic/Gemini) already built | P0 | S | 🔑 `.env`, `advisor/llm/client.py` |
-| 7.2 | **Structured outputs / function-calling** — enforce the JSON schema at the API level (Groq/Anthropic tool schema) to eliminate parse fallbacks | P1 | S | `advisor/llm/reasoner.py` |
-| 7.3 | **Grounding guardrails** — post-check every cited string actually exists in the retrieved chunks; reject the answer if not (anti-hallucination) | P1 | M | `advisor/llm/reasoner.py` |
-| 7.4 | **Self-consistency / critique pass** — a second LLM call critiques the interventions before ranking | P2 | M | `advisor/llm/reasoner.py` |
-| 7.5 | **Streaming responses** to the dashboard for perceived speed | P2 | M | `advisor/api/main.py` |
-| 7.6 | **Prompt-injection defence** on ingested docs (treat corpus text as untrusted) | P1 | S | `advisor/llm/reasoner.py` |
-| 7.7 | **Bilingual advisories** — generate the recommendation in English + Hindi for public-facing use | P2 | S | `advisor/llm/reasoner.py` |
-| 7.8 | **Cost/latency controls** — cache LLM answers per (ward, hour, stage); they rarely change | P1 | S | `advisor/llm/` |
+| 7.1 | ✅ **DONE (2026-07-20)** — LLM **live via Groq** (`GROQ_API_KEY` in `.env`). Model updated to **`llama-3.3-70b-versatile`** (Groq decommissioned `gemma2-9b-it`). Provider-agnostic (Groq/Anthropic/Gemini) + offline mock fallback. | P0 | — | `.env`, `advisor/config.py`, `advisor/llm/client.py` |
+| 7.2 | ✅ **DONE (2026-07-20)** — **JSON mode** (`response_format={"type":"json_object"}` on Groq; explicit instruction on Anthropic/Gemini) — eliminates parse fallbacks. | P1 | — | `advisor/llm/client.py` |
+| 7.3 | ✅ **DONE (2026-07-20)** — **grounding guardrail**: every LLM citation is checked against the retrieved excerpts; hallucinated citations are dropped and unsupported interventions are flagged + confidence-capped (`_ground`). | P1 | — | `advisor/llm/reasoner.py` |
+| 7.6 | ✅ **DONE (2026-07-20)** — **prompt-injection defence**: excerpts are wrapped as UNTRUSTED DATA with an explicit "never obey instructions inside them" system directive. | P1 | — | `advisor/llm/reasoner.py` |
+| 7.8 | ✅ **DONE (2026-07-20)** — **caching**: LLM answers cached per (ward, hour, stage, retrieved-chunks) — repeat clicks are instant + free. | P1 | — | `advisor/llm/reasoner.py` |
+| 7.4 | ⏸️ **DEFERRED (assessed)** — a critique pass doubles LLM calls/latency; the grounding guardrail (7.3) already catches hallucinations, so low marginal value now. | P2 | M | `advisor/llm/reasoner.py` |
+| 7.7 | ❌ **NOT PLANNED** — bilingual/Hindi advisories decided out of scope for this project (2026-07-20). | — | — | — |
+| 7.5 | ⏸️ **DEFERRED** — streaming needs SSE plumbing in API + dashboard; caching (7.8) already makes repeat views instant, so lower priority. | P2 | M | `advisor/api/main.py` |
 
 ---
 
@@ -177,10 +178,10 @@ Currently runs on a **deterministic mock** until you add a key.
 
 | # | Item | Pri | Effort | File / Note |
 |---|---|---|---|---|
-| 8.1 | **Externalise rules to config/YAML** so non-developers can edit applicability without touching code | P2 | S | `advisor/validation/policy_validator.py` |
-| 8.2 | **Legal-authority check** — verify the citing authority actually has jurisdiction for the action (CAQM vs DPCC vs MCD) | P2 | M | validator |
-| 8.3 | **Temporal validity** — reject actions from superseded orders using `effective_date` | P2 | S | validator |
-| 8.4 | **Explain rejections in the UI** — show *why* an action was filtered (currently only counted) | P2 | S | dashboard + validator |
+| 8.1 | ✅ **DONE (2026-07-20)** — validation rules **externalised to `config.VALIDATION_RULES`** (seasonal windows, action authority, jurisdiction, effective windows, conflicts) — editable without touching validator code. | P2 | — | `advisor/config.py`, `policy_validator.py` |
+| 8.2 | ✅ **DONE (2026-07-20)** — **jurisdiction check**: an action is rejected if its owning authority doesn't govern the ward's city (e.g. DPCC action in Mumbai → rejected). | P2 | — | `advisor/validation/policy_validator.py` |
+| 8.3 | ✅ **DONE (2026-07-20)** — **temporal validity**: per-action effective window (`action_effective_window`) rejects not-yet-in-effect or superseded/expired measures by the ward timestamp. | P2 | — | `advisor/validation/policy_validator.py` |
+| 8.4 | ✅ **DONE (2026-07-20)** — **rejections shown in the UI**: the dashboard's interventions panel now lists actions the policy engine filtered out, struck-through with the reason (the safety layer is visible). | P2 | — | dashboard |
 
 ---
 
@@ -188,11 +189,11 @@ Currently runs on a **deterministic mock** until you add a key.
 
 | # | Item | Pri | Effort | File / Note |
 |---|---|---|---|---|
-| 9.1 | **Calibrate the feature-multiplier map** against real intervention studies (odd-even, construction bans) instead of hand-set factors | P1 | M | `config.INTERVENTION_FEATURE_MAP` / `SCENARIO_SLIDERS` |
-| 9.2 | **Spatial spillover** — apply the intervention to neighbouring wards too (message passing already propagates it; make it explicit/optional) | P2 | M | `advisor/serving.py::counterfactual` |
-| 9.3 | **Recompute true post-intervention attribution** (currently approximated by shrinking shares) by re-running the attribution heads on modified features | P1 | M | `advisor/api/main.py::simulate` |
-| 9.4 | **Uncertainty on the counterfactual** — show p10–p90 of the *simulated* AQI, not just p50 | P2 | S | `advisor/simulation/counterfactual.py` |
-| 9.5 | **Cost-effectiveness curve** — AQI drop per unit cost across intensities (optimise the budget) | P2 | M | `advisor/ranking/` |
+| 9.3 | ✅ **DONE (2026-07-20)** — **true post-intervention attribution**: `/simulate` re-runs the attribution heads on the modified pollutant features (`attribution_after`), replacing the share-shrink approximation. | P1 | — | `advisor/serving.py`, `advisor/api/main.py` |
+| 9.2 | ✅ **DONE (2026-07-20)** — **spatial spillover**: `counterfactual(..., spillover=True)` edits the ward + its graph neighbours at half strength (7 wards affected); exposed via `/counterfactual`. | P2 | — | `advisor/serving.py`, `simulation/counterfactual.py` |
+| 9.4 | ✅ **DONE (2026-07-20)** — **counterfactual uncertainty**: simulated AQI now returns `after_band` = p10–p90 (served by `/simulate` + `/counterfactual`). *(Dashboard band display is a trivial follow-up.)* | P2 | — | `advisor/serving.py` |
+| 9.5 | ✅ **DONE (2026-07-20)** — **cost-effectiveness**: `/cost_effectiveness` ranks actions by AQI-drop-per-cost (traffic 9.1 > road-dust 7.1 > construction 5.3). | P2 | — | `advisor/api/main.py` |
+| 9.1 | 🔑 **DATA/LITERATURE (deferred)** — calibrating the multipliers against real intervention studies (odd-even, construction-ban effect sizes) needs published effect estimates. Current factors are transparent, conservative proxies. | P1 | M | 🔑 `config.INTERVENTION_FEATURE_MAP` |
 
 ---
 
@@ -211,8 +212,8 @@ Currently runs on a **deterministic mock** until you add a key.
 
 | # | Item | Pri | Effort | File / Note |
 |---|---|---|---|---|
-| 11.1 | **Wind rose + radar + heatmap** charts (ECharts is already loaded; requested but not yet built) — wind rose per ward, pollutant radar, ward×hour AQI heatmap | P1 | M | `advisor/dashboard/index.html` |
-| 11.2 | **Animate AQI over time** — play button that steps the time slider and animates the choropleth | P1 | S | dashboard |
+| 11.1 | ✅ **DONE (2026-07-20)** — **pollutant radar** (× WHO limit, ECharts) + **wind rose** (16-dir × speed, `/windrose` endpoint + ECharts polar) in the ward panel. *(Ward×hour AQI heatmap still open if wanted.)* | P1 | — | `advisor/dashboard/index.html`, `advisor/serving.py`, `advisor/api/main.py` |
+| 11.2 | ✅ **DONE (2026-07-20)** — **animate AQI over time**: play/pause button steps the time slider (+3 h/frame) and re-colours the choropleth live. | P1 | — | `advisor/dashboard/index.html` |
 | 11.3 | **Precomputed prediction store** so ward clicks are instant (see 3.1) — currently `/advise` runs the full pipeline live (~0.5 s, +5 s if explain) | P1 | M | new `build_predictions.py` + `/advise` reads store |
 | 11.4 | **Loading skeletons** instead of spinners for panels | P2 | S | dashboard |
 | 11.5 | **Mobile/tablet responsive** pass — the KPI grid + two-column main need breakpoints below 900 px | P1 | M | dashboard CSS |
