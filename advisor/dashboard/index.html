@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>AIRIS · Delhi Air Quality Command Center</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<style>
+:root{
+  --bg:#0a0f1a;--bg2:#0d1524;--glass:rgba(23,34,54,.62);--glass2:rgba(30,44,68,.55);
+  --line:rgba(90,120,160,.22);--line2:rgba(120,150,190,.35);
+  --txt:#eaf2fb;--mut:#8ea3bd;--dim:#5f748f;--acc:#37b6ff;--acc2:#5ee7c7;
+  --good:#26c281;--warn:#ffb020;--bad:#ff5c5c;--surface:#0d1524;
+  --shadow:0 8px 30px rgba(0,0,0,.35);--r:14px;
+}
+html[data-theme="light"]{
+  --bg:#eef3f8;--bg2:#e6edf5;--glass:rgba(255,255,255,.75);--glass2:rgba(255,255,255,.6);
+  --line:rgba(30,60,100,.14);--line2:rgba(30,60,100,.25);
+  --txt:#0f2136;--mut:#4a5f78;--dim:#7387a0;--acc:#1478d4;--acc2:#0f9e86;--surface:#ffffff;
+  --shadow:0 8px 26px rgba(30,60,100,.12);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Segoe UI',system-ui,Roboto,sans-serif;background:
+  radial-gradient(1200px 700px at 80% -10%,rgba(55,182,255,.10),transparent 60%),
+  radial-gradient(900px 600px at -5% 110%,rgba(94,231,199,.08),transparent 55%),var(--bg);
+  color:var(--txt);overflow:hidden}
+.glass{background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow)}
+/* ---- top nav ---- */
+nav{display:flex;align-items:center;gap:16px;padding:10px 18px;height:58px;
+  background:linear-gradient(180deg,rgba(13,21,36,.9),rgba(13,21,36,.6));border-bottom:1px solid var(--line);
+  backdrop-filter:blur(12px);position:relative;z-index:1000}
+.brand{display:flex;align-items:center;gap:10px}
+.brand .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--acc),var(--acc2));
+  display:grid;place-items:center;color:#04121f;box-shadow:0 0 18px rgba(55,182,255,.4)}
+.brand b{font-size:16px;letter-spacing:.5px}.brand span{font-size:10.5px;color:var(--mut);display:block;margin-top:-2px}
+.navchip{display:flex;align-items:center;gap:7px;padding:5px 11px;border-radius:10px;background:var(--glass2);
+  border:1px solid var(--line);font-size:12px;color:var(--mut)}
+.navchip b{color:var(--txt);font-size:14px}
+.navtools{margin-left:auto;display:flex;gap:8px;align-items:center}
+.ico-btn{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--glass2);
+  border:1px solid var(--line);color:var(--mut);cursor:pointer;transition:.18s;position:relative}
+.ico-btn:hover{color:var(--acc);border-color:var(--acc);transform:translateY(-1px)}
+.badge{position:absolute;top:-4px;right:-4px;background:var(--bad);color:#fff;font-size:9px;font-weight:700;
+  border-radius:9px;padding:1px 5px}
+input.search{background:var(--glass2);border:1px solid var(--line);border-radius:10px;color:var(--txt);
+  padding:7px 12px;font-size:13px;width:210px;transition:.18s}
+input.search:focus{outline:none;border-color:var(--acc);box-shadow:0 0 0 3px rgba(55,182,255,.15)}
+/* ---- layout ---- */
+.shell{display:grid;grid-template-rows:auto 1fr;height:calc(100vh - 58px);gap:12px;padding:12px;overflow:hidden}
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px}
+.kpi{padding:12px 14px;position:relative;overflow:hidden;transition:.2s;cursor:default}
+.kpi:hover{transform:translateY(-2px);border-color:var(--line2)}
+.kpi .k-top{display:flex;justify-content:space-between;align-items:center}
+.kpi .k-ico{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:var(--glass2);color:var(--acc)}
+.kpi .k-lab{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
+.kpi .k-val{font-size:27px;font-weight:750;line-height:1.1;margin-top:6px}
+.kpi .k-sub{font-size:11.5px;color:var(--mut);margin-top:2px;display:flex;align-items:center;gap:5px}
+.kpi .spark{position:absolute;bottom:0;left:0;right:0;height:34px;opacity:.55}
+.chg{font-weight:700;font-size:11.5px}.chg.up{color:var(--bad)}.chg.dn{color:var(--good)}
+.main{display:grid;grid-template-columns:1.35fr 1fr;gap:12px;min-height:0;overflow:hidden}
+/* ---- map ---- */
+.mapcard{position:relative;overflow:hidden;padding:0}
+#map{position:absolute;inset:0;border-radius:var(--r)}
+.map-top{position:absolute;top:12px;left:12px;right:12px;z-index:600;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.seg{display:flex;gap:2px;background:var(--glass);border:1px solid var(--line);border-radius:10px;padding:3px;
+  backdrop-filter:blur(12px)}
+.seg button{border:none;background:transparent;color:var(--mut);font-size:11.5px;padding:5px 9px;border-radius:7px;cursor:pointer;transition:.15s;white-space:nowrap}
+.seg button.on{background:var(--acc);color:#04121f;font-weight:650}
+.seg button:hover:not(.on){color:var(--txt)}
+.map-r{margin-left:auto;display:flex;gap:6px}
+.legend{position:absolute;bottom:56px;right:12px;z-index:600;padding:10px 12px;font-size:11px;max-width:190px}
+.legend .li{display:flex;align-items:center;gap:6px;margin:3px 0}
+.legend i{width:12px;height:12px;border-radius:3px}
+.timebar{position:absolute;bottom:12px;left:12px;right:12px;z-index:600;padding:8px 14px;display:flex;align-items:center;gap:12px;font-size:12px;color:var(--mut)}
+.timebar input{flex:1;accent-color:var(--acc)}
+/* ---- right analysis ---- */
+.analysis{overflow-y:auto;padding-right:4px;display:flex;flex-direction:column;gap:12px;min-height:0}
+.analysis::-webkit-scrollbar{width:8px}.analysis::-webkit-scrollbar-thumb{background:var(--line2);border-radius:8px}
+.panel{padding:14px 16px;animation:rise .35s ease both}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+.panel h3{margin:0 0 11px;font-size:11.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--mut);display:flex;align-items:center;gap:7px}
+.panel h3 .spark-ico{color:var(--acc)}
+.hero{display:flex;gap:16px;align-items:center}
+.hero .num{font-size:44px;font-weight:800;line-height:1}
+.pill{display:inline-flex;align-items:center;padding:3px 11px;border-radius:20px;font-size:12px;font-weight:700;color:#04121f}
+.chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
+.chip{background:var(--glass2);border:1px solid var(--line);border-radius:9px;padding:6px 10px;font-size:12px;color:var(--mut);display:flex;flex-direction:column;gap:1px;min-width:74px}
+.chip b{color:var(--txt);font-size:14px}
+.advice{border-left:3px solid var(--acc);padding:9px 12px;border-radius:7px;font-size:12.5px;line-height:1.5;background:var(--glass2)}
+.tabs{display:flex;gap:4px;background:var(--glass2);border:1px solid var(--line);border-radius:10px;padding:3px;width:max-content}
+.tabs button{border:none;background:transparent;color:var(--mut);font-size:12px;padding:5px 12px;border-radius:7px;cursor:pointer}
+.tabs button.on{background:var(--acc);color:#04121f;font-weight:650}
+/* scenario */
+.slider-row{display:grid;grid-template-columns:150px 1fr 42px;gap:10px;align-items:center;margin:9px 0}
+.slider-row .sl-lab{font-size:12px;display:flex;align-items:center;gap:7px;color:var(--txt)}
+.slider-row .sl-lab .li{width:24px;height:24px;border-radius:7px;background:var(--glass2);display:grid;place-items:center;color:var(--acc2)}
+.slider-row input[type=range]{width:100%;accent-color:var(--acc)}
+.slider-row .sl-val{font-size:12px;font-weight:700;color:var(--acc);text-align:right}
+.btn{border:1px solid var(--line2);background:var(--glass2);color:var(--txt);padding:9px 16px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;transition:.18s;display:inline-flex;align-items:center;gap:7px}
+.btn:hover{border-color:var(--acc);transform:translateY(-1px)}
+.btn.primary{background:linear-gradient(135deg,var(--acc),var(--acc2));color:#04121f;border:none;box-shadow:0 4px 16px rgba(55,182,255,.35)}
+.cmp{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center;text-align:center;margin-top:8px}
+.cmp .big{font-size:34px;font-weight:800}
+.cmp .arrow{color:var(--acc);font-size:22px}
+.rec{border-radius:11px;padding:11px 13px;margin-bottom:9px;border:1px solid var(--line);background:var(--glass2);border-left-width:4px;transition:.18s}
+.rec:hover{transform:translateX(2px);border-color:var(--line2)}
+.rec .r-top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.rec .prio{font-size:10px;font-weight:800;padding:2px 8px;border-radius:6px;text-transform:uppercase;letter-spacing:.5px}
+.rec .r-meta{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:11.5px;color:var(--mut);margin-top:7px}
+.rec .r-meta b{color:var(--txt)}
+.pol{border-bottom:1px solid var(--line);padding:9px 0;font-size:12px;cursor:pointer}
+.pol:hover{color:var(--acc)}
+.pol .p-more{max-height:0;overflow:hidden;transition:max-height .3s ease;color:var(--mut);font-size:11.5px}
+.pol.open .p-more{max-height:200px;margin-top:6px}
+.muted{color:var(--mut);font-size:12px}
+.spin{width:16px;height:16px;border:2px solid var(--line2);border-top-color:var(--acc);border-radius:50%;display:inline-block;animation:sp 1s linear infinite;vertical-align:-3px}
+@keyframes sp{to{transform:rotate(360deg)}}
+.empty{color:var(--mut);text-align:center;padding:50px 16px;line-height:1.7}
+.leaflet-popup-content-wrapper{background:var(--glass);color:var(--txt);backdrop-filter:blur(10px);border:1px solid var(--line)}
+.leaflet-popup-tip{background:var(--glass)}
+@media(max-width:1200px){.kpis{grid-template-columns:repeat(3,1fr)}.main{grid-template-columns:1fr}}
+@media print{nav .navtools,.map-top,.timebar{display:none}.main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<nav>
+  <div class="brand"><div class="logo"><i data-lucide="wind" style="width:19px"></i></div>
+    <div><b>AIRIS</b><span>Delhi AQI Decision Intelligence</span></div></div>
+  <div class="navchip"><i data-lucide="calendar" style="width:14px"></i><span id="navDate">—</span></div>
+  <div class="navchip"><i data-lucide="gauge" style="width:14px"></i>City Avg <b id="navAvg">—</b></div>
+  <div class="navchip"><i data-lucide="triangle-alert" style="width:14px"></i>Worst <b id="navWorst">—</b></div>
+  <div class="navtools">
+    <input class="search" id="search" list="wardlist" placeholder="Search ward…"/><datalist id="wardlist"></datalist>
+    <button class="ico-btn" id="cmp" title="Compare wards"><i data-lucide="git-compare" style="width:17px"></i></button>
+    <button class="ico-btn" onclick="window.print()" title="Export report"><i data-lucide="download" style="width:17px"></i></button>
+    <button class="ico-btn" id="notif" title="Alerts"><i data-lucide="bell" style="width:17px"></i><span class="badge" id="notifN">0</span></button>
+    <button class="ico-btn" id="theme" title="Theme"><i data-lucide="sun" style="width:17px"></i></button>
+  </div>
+</nav>
+
+<div class="shell">
+  <div class="kpis" id="kpis"></div>
+  <div class="main">
+    <div class="mapcard glass">
+      <div id="map"></div>
+      <div class="map-top">
+        <div class="seg" id="layerSeg"></div>
+        <div class="map-r">
+          <div class="seg" id="baseSeg"></div>
+          <button class="ico-btn" id="fs" title="Fullscreen"><i data-lucide="maximize" style="width:16px"></i></button>
+          <button class="ico-btn" id="reset" title="Reset view"><i data-lucide="locate-fixed" style="width:16px"></i></button>
+        </div>
+      </div>
+      <div class="legend glass" id="legend"></div>
+      <div class="timebar glass"><i data-lucide="clock" style="width:15px"></i>
+        <input type="range" id="tslider" min="0" max="100" value="100"/>
+        <span id="tlabel" style="min-width:132px;text-align:right;color:var(--txt)">—</span></div>
+    </div>
+    <div class="analysis" id="analysis">
+      <div class="panel glass empty"><span class="spin"></span> Initialising command center…<br/>
+        Select a ward on the map to open the decision panel: forecast, explainability, source attribution, scenario simulation and policy intelligence.</div>
+    </div>
+  </div>
+</div>
+
+<script>
+let REF,ACTIONS,GEO,map,layer,baseLayers={},curBase='dark',LAYERS=[],layerBy={},srcMap=null;
+let curLayer='aqi',current=null,tIndex=null,cache={},srcCache={},neighLines=[],cmpMode=false,cmpFirst=null,curWard=null;
+const SEQ=['#0d3b66','#1466a3','#2f9e44','#f6c000','#f76707','#e03131']; // sequential ramp (low→high)
+async function j(u,o){const r=await fetch(u,o);if(!r.ok)throw new Error(await r.text());return r.json();}
+function band(a){for(const b of REF.bands)if(a>=b.lo&&a<=b.hi)return b;return{name:'Severe+',color:'#7a0033'};}
+function color(a){return band(a).color;}
+function srcColor(s){return (REF.source_colors||{})[s==='industry'?'industrial':s]||'#8899aa';}
+function ico(){if(window.lucide)lucide.createIcons();}
+
+/* ---------- init ---------- */
+async function init(){
+  REF=await j('/reference');ACTIONS=await j('/actions');const h=await j('/health');
+  document.getElementById('notifN').textContent='';
+  buildLayerSeg();buildBaseSeg();buildKpisShell();
+  map=L.map('map',{zoomControl:true,preferCanvas:true,attributionControl:false}).setView([28.63,77.11],10.4);
+  baseLayers.dark=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{maxZoom:18});
+  baseLayers.street=L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',{maxZoom:18});
+  baseLayers.satellite=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:18});
+  baseLayers.terrain=L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxZoom:17});
+  baseLayers.dark.addTo(map);
+  GEO=await j('/wards.geojson');
+  const sl=document.getElementById('tslider');sl.max=REF.n_times-1;sl.value=REF.latest_index;tIndex=REF.latest_index;
+  sl.addEventListener('input',()=>{clearTimeout(window._t);window._t=setTimeout(()=>loadLayers(+sl.value),140);});
+  document.getElementById('search').addEventListener('change',e=>{
+    const w=LAYERS.find(x=>x.ward_name.toUpperCase()===e.target.value.toUpperCase());if(w)selectWard(w.ward_id);});
+  document.getElementById('theme').onclick=toggleTheme;
+  document.getElementById('reset').onclick=()=>map.setView([28.63,77.11],10.4);
+  document.getElementById('fs').onclick=()=>{const el=document.querySelector('.mapcard');(el.requestFullscreen||el.webkitRequestFullscreen).call(el);setTimeout(()=>map.invalidateSize(),300);};
+  document.getElementById('cmp').onclick=()=>{cmpMode=!cmpMode;cmpFirst=null;document.getElementById('cmp').style.color=cmpMode?'var(--acc)':'';
+    if(cmpMode)setAnalysis('<div class="panel glass empty">Compare mode — click two wards.</div>');};
+  await loadLayers(tIndex,true);ico();
+}
+
+function buildLayerSeg(){
+  document.getElementById('layerSeg').innerHTML=Object.entries(REF.map_layers).map(([k,v])=>
+    `<button data-l="${k}" class="${k==='aqi'?'on':''}">${v.label}</button>`).join('');
+  document.querySelectorAll('#layerSeg button').forEach(b=>b.onclick=()=>setLayer(b.dataset.l));
+}
+function buildBaseSeg(){
+  document.getElementById('baseSeg').innerHTML=['dark','street','satellite','terrain'].map(b=>
+    `<button data-b="${b}" class="${b==='dark'?'on':''}">${b[0].toUpperCase()+b.slice(1)}</button>`).join('');
+  document.querySelectorAll('#baseSeg button').forEach(b=>b.onclick=()=>{
+    map.removeLayer(baseLayers[curBase]);curBase=b.dataset.b;baseLayers[curBase].addTo(map);
+    document.querySelectorAll('#baseSeg button').forEach(x=>x.classList.toggle('on',x===b));});
+}
+
+/* ---------- KPI cards ---------- */
+const KPI=[['Current AQI','activity'],['Predicted AQI (24h)','trending-up'],['Highest-Risk Ward','triangle-alert'],
+  ['City Average','gauge'],['Dominant Source','factory'],['Forecast Confidence','shield-check']];
+function buildKpisShell(){
+  document.getElementById('kpis').innerHTML=KPI.map((k,i)=>`
+   <div class="kpi glass"><div class="k-top"><span class="k-lab">${k[0]}</span>
+   <span class="k-ico"><i data-lucide="${k[1]}" style="width:16px"></i></span></div>
+   <div class="k-val" id="kv${i}">—</div><div class="k-sub" id="ks${i}"></div>
+   <div class="spark" id="kp${i}"></div></div>`).join('');
+}
+function animCount(el,to,suffix=''){const from=parseFloat(el.dataset.v||'0');const t0=performance.now();
+  (function step(t){const p=Math.min((t-t0)/650,1);el.textContent=Math.round(from+(to-from)*p)+suffix;
+   if(p<1)requestAnimationFrame(step);else el.dataset.v=to;})(t0);}
+function updateKpis(wards,ward){
+  const v=wards.map(w=>w.aqi),avg=Math.round(v.reduce((a,b)=>a+b,0)/v.length);
+  const worst=wards.reduce((m,w)=>w.aqi>m.aqi?w:m,wards[0]);
+  const cur=ward?ward.current_aqi:Math.round(wards.map(w=>w.current_aqi||0).reduce((a,b)=>a+b,0)/v.length);
+  const pred=ward?ward.aqi:avg;
+  animCount(document.getElementById('kv0'),cur||0);document.getElementById('kv0').style.color=color(cur||0);
+  animCount(document.getElementById('kv1'),pred);document.getElementById('kv1').style.color=color(pred);
+  document.getElementById('kv2').textContent=worst.ward_name.slice(0,14);document.getElementById('kv2').style.color=color(worst.aqi);
+  document.getElementById('ks2').innerHTML=`AQI <b style="color:${color(worst.aqi)}">${worst.aqi}</b>`;
+  animCount(document.getElementById('kv3'),avg);document.getElementById('kv3').style.color=color(avg);
+  const chg=cur?Math.round((pred-cur)/cur*100):0;
+  document.getElementById('ks1').innerHTML=`<span class="chg ${chg>0?'up':'dn'}">${chg>0?'▲':'▼'} ${Math.abs(chg)}%</span> vs current`;
+  document.getElementById('ks0').textContent='observed now';
+  document.getElementById('ks3').textContent=wards.length+' wards';
+  // dominant source citywide (from srcMap if loaded, else '—')
+  if(srcMap){const c={};Object.values(srcMap).forEach(s=>c[s]=(c[s]||0)+1);
+    const top=Object.entries(c).sort((a,b)=>b[1]-a[1])[0];
+    document.getElementById('kv4').textContent=(top[0]||'').replace('_dominated','');
+    document.getElementById('kv4').style.fontSize='19px';document.getElementById('ks4').textContent=top[1]+' wards';}
+  else{document.getElementById('kv4').textContent='—';document.getElementById('kv4').style.fontSize='19px';}
+  const conf=ward?Math.round((ward.confidence||.6)*100):Math.round(REF.bands?78:78);
+  animCount(document.getElementById('kv5'),ward?conf:78,'%');
+  document.getElementById('ks5').textContent=ward?'ward-level':'model avg';
+  // sparklines: city band distribution as mini bars
+  sparkBands('kp3',wards);sparkBands('kp1',wards);
+}
+function sparkBands(id,wards){const el=document.getElementById(id);const counts=REF.bands.map(b=>wards.filter(w=>w.aqi>=b.lo&&w.aqi<=b.hi).length);
+  const mx=Math.max(...counts,1);el.innerHTML='<div style="display:flex;align-items:flex-end;gap:2px;height:100%;padding:0 6px 3px">'+
+    counts.map((c,i)=>`<div style="flex:1;height:${8+80*c/mx}%;background:${REF.bands[i].color};border-radius:2px 2px 0 0;opacity:.8"></div>`).join('')+'</div>';}
+
+/* ---------- map layers ---------- */
+async function loadLayers(idx,first){
+  tIndex=idx;let d=cache[idx];if(!d){d=await j('/layers?time_index='+idx);cache[idx]=d;}
+  LAYERS=d.wards;layerBy={};LAYERS.forEach(w=>layerBy[w.ward_id]=w);
+  const dt=d.time.replace('T',' ').slice(0,16);
+  document.getElementById('tlabel').textContent=dt;document.getElementById('navDate').textContent=d.time.slice(0,10);
+  if(first){
+    layer=L.geoJSON(GEO,{style:styleFn,onEachFeature:(f,l)=>{
+      l.on('click',()=>selectWard(f.properties.ward_id));
+      l.on('mouseover',()=>l.setStyle({weight:2.6,color:'#fff',fillOpacity:.92}));
+      l.on('mouseout',()=>{if(current!==f.properties.ward_id)layer.resetStyle(l);});
+      l.bindTooltip(()=>tip(f.properties.ward_id),{sticky:true,className:'lt'});
+    }}).addTo(map);
+    document.getElementById('wardlist').innerHTML=LAYERS.map(w=>`<option value="${w.ward_name}">`).join('');
+    setAnalysis('<div class="panel glass empty"><i data-lucide="mouse-pointer-click" style="width:26px"></i><br/>Click any ward to open the decision panel.</div>');ico();
+  }
+  restyle();
+  const avg=Math.round(LAYERS.map(w=>w.aqi).reduce((a,b)=>a+b,0)/LAYERS.length);
+  const worst=LAYERS.reduce((m,w)=>w.aqi>m.aqi?w:m,LAYERS[0]);
+  document.getElementById('navAvg').textContent=avg;document.getElementById('navAvg').style.color=color(avg);
+  document.getElementById('navWorst').textContent=worst.ward_name.slice(0,12)+' ('+worst.aqi+')';
+  const alerts=LAYERS.filter(w=>w.aqi>300).length;document.getElementById('notifN').textContent=alerts;
+  updateKpis(LAYERS,curWard?layerBy[curWard]:null);
+}
+function metricVal(w){return curLayer==='source'?(srcMap?srcMap[w.ward_id]:null):w[curLayer];}
+function layerColor(w){
+  const L=REF.map_layers[curLayer];const v=metricVal(w);
+  if(v==null)return '#33415a';
+  if(curLayer==='aqi'||curLayer==='current_aqi')return color(v);
+  if(curLayer==='source')return srcColor((v||'').replace('_dominated',''));
+  if(curLayer==='forecast_diff'){const t=Math.max(-120,Math.min(120,v))/120;
+    return t>=0?`rgb(${224},${Math.round(120-80*t)},${Math.round(80-60*t)})`:`rgb(${Math.round(40-40*t)},${Math.round(120-60*t)},${Math.round(180+40*(-t))})`;}
+  // sequential
+  const vals=LAYERS.map(metricVal).filter(x=>x!=null);const mn=Math.min(...vals),mx=Math.max(...vals);
+  const t=(v-mn)/((mx-mn)||1);const idx=Math.min(SEQ.length-1,Math.floor(t*SEQ.length));return SEQ[idx];
+}
+function styleFn(f){const w=layerBy[f.properties.ward_id];return{fillColor:w?layerColor(w):'#33415a',fillOpacity:.78,color:'#0a0f1a',weight:.5};}
+function restyle(){if(layer)layer.setStyle(styleFn);drawLegend();}
+async function setLayer(l){
+  curLayer=l;document.querySelectorAll('#layerSeg button').forEach(b=>b.classList.toggle('on',b.dataset.l===l));
+  if(l==='source'&&!srcMap){srcMap=(await j('/layers/source?time_index='+tIndex)).source;srcCache[tIndex]=srcMap;
+    updateKpis(LAYERS,curWard?layerBy[curWard]:null);}
+  restyle();
+}
+function drawLegend(){
+  const L=REF.map_layers[curLayer];let html=`<b style="color:var(--txt)">${L.label}</b>`;
+  if(curLayer==='aqi'||curLayer==='current_aqi')html+=REF.bands.map(b=>`<div class="li"><i style="background:${b.color}"></i>${b.name}</div>`).join('');
+  else if(curLayer==='source')html+=Object.keys(REF.source_colors).filter((v,i,a)=>a.indexOf(v)===i&&v!=='industry').map(s=>`<div class="li"><i style="background:${srcColor(s)}"></i>${s}</div>`).join('');
+  else if(curLayer==='forecast_diff')html+='<div class="li"><i style="background:rgb(224,40,20)"></i>rising</div><div class="li"><i style="background:#2f6fb0"></i>falling</div>';
+  else{const vals=LAYERS.map(metricVal).filter(x=>x!=null);const mn=Math.min(...vals).toFixed(0),mx=Math.max(...vals).toFixed(0);
+    html+=`<div style="display:flex;height:10px;border-radius:5px;overflow:hidden;margin:5px 0">${SEQ.map(c=>`<span style="flex:1;background:${c}"></span>`).join('')}</div><div class="muted" style="display:flex;justify-content:space-between"><span>${mn}</span><span>${mx}</span></div>`;}
+  document.getElementById('legend').innerHTML=html;
+}
+function tip(id){const w=layerBy[id];if(!w)return id;const v=metricVal(w);
+  return `<b>${w.ward_name}</b><br>${REF.map_layers[curLayer].label}: <b>${curLayer==='source'?(v||'').replace('_dominated',''):v}</b><br><span style="color:var(--mut)">AQI ${w.aqi} · ${band(w.aqi).name}</span>`;}
+
+function setAnalysis(h){document.getElementById('analysis').innerHTML=h;ico();}
+function highlight(id){current=id;if(layer)layer.eachLayer(l=>{if(l.feature.properties.ward_id===id)l.setStyle({weight:3,color:'#fff'});else layer.resetStyle(l);});}
+
+/* ---------- ward selection ---------- */
+async function selectWard(id){
+  if(cmpMode){if(!cmpFirst){cmpFirst=id;setAnalysis(`<div class="panel glass empty">First: <b>${layerBy[id].ward_name}</b>. Click a second ward…</div>`);return;}return compare(cmpFirst,id);}
+  curWard=id;highlight(id);
+  setAnalysis('<div class="panel glass empty"><span class="spin"></span> Running forecast → retrieval → reasoning → counterfactual…</div>');
+  let a;try{a=await j('/advise?ward_id='+encodeURIComponent(id)+'&time_index='+tIndex);}catch(e){setAnalysis('<div class="panel glass empty">Error: '+e.message+'</div>');return;}
+  renderWard(id,a);updateKpis(LAYERS,{...layerBy[id],confidence:a.context.source_confidence});
+}
+
+function renderWard(id,a){
+  const c=a.context,aqi=c.predicted_aqi,b=band(aqi),cur=layerBy[id]?layerBy[id].current_aqi:null;
+  const risk=aqi>300?'Very High':aqi>200?'High':aqi>100?'Moderate':'Low';
+  const riskCol=aqi>300?'var(--bad)':aqi>200?'var(--warn)':aqi>100?'#e6c34a':'var(--good)';
+  let h='';
+  h+=`<div class="panel glass"><h3><i data-lucide="map-pin" class="spark-ico" style="width:15px"></i>${c.ward_name} <span class="muted">#${c.ward_id}</span></h3>
+    <div class="hero"><div class="num" style="color:${b.color}">${aqi}</div>
+      <div><div><span class="pill" style="background:${b.color}">${c.aqi_band}</span>
+      ${c.grap_stage?`<span class="muted"> · GRAP ${c.grap_stage}</span>`:''}</div>
+      <div class="muted" style="margin-top:6px">${c.forecast_horizon} forecast · ${c.timestamp}</div>
+      <div style="margin-top:4px;font-size:12px">Risk <b style="color:${riskCol}">${risk}</b> · Confidence <b style="color:var(--acc2)">${Math.round(c.source_confidence*100)}%</b></div></div></div>
+    <div class="chips">
+      <div class="chip">Current<b style="color:${color(cur||0)}">${cur??'–'}</b></div>
+      <div class="chip">Range<b>${c.aqi_low}–${c.aqi_high}</b></div>
+      <div class="chip">Wind<b>${fmt(c.meteorology.wind_speed)} ${c.meteorology.wind_direction||''}</b></div>
+      <div class="chip">Humidity<b>${c.meteorology.humidity??'–'}%</b></div>
+      <div class="chip">Temp<b>${fmt(c.meteorology.temperature)}°</b></div>
+      <div class="chip">Pop.<b>${((c.ward_metadata.population||0)/1000).toFixed(0)}k</b></div></div>
+    <div class="advice" style="margin-top:11px;border-color:${b.color}">${REF.health_advice[c.aqi_band]||''}</div></div>`;
+  // forecast timeline
+  h+=`<div class="panel glass"><h3><i data-lucide="line-chart" class="spark-ico" style="width:15px"></i>Forecast timeline
+      <div class="tabs" style="margin-left:auto" id="hzTabs">
+      <button class="on" data-h="24">24h</button><button data-h="48">48h</button><button data-h="72">72h</button></div></h3>
+      <div id="trend" style="height:200px"></div></div>`;
+  // source donut
+  h+=`<div class="panel glass"><h3><i data-lucide="pie-chart" class="spark-ico" style="width:15px"></i>Source attribution</h3><div id="donut" style="height:210px"></div></div>`;
+  // SHAP + GNN
+  h+=`<div class="panel glass"><h3><i data-lucide="brain" class="spark-ico" style="width:15px"></i>Explainability (SHAP)</h3>
+      <div id="shapWrap"><button class="btn" onclick="loadExplain('${id}')"><i data-lucide="sparkles" style="width:15px"></i> Compute feature attribution</button></div></div>`;
+  h+=`<div class="panel glass"><h3><i data-lucide="share-2" class="spark-ico" style="width:15px"></i>Neighbour influence (GNN)</h3><div id="gnn" style="height:230px" class="muted">Load explainability to visualise the influence graph.</div></div>`;
+  // scenario builder
+  h+=scenarioHtml(id,aqi);
+  // recommendations
+  h+=`<div class="panel glass"><h3><i data-lucide="list-checks" class="spark-ico" style="width:15px"></i>Recommended interventions</h3><div id="recs"></div></div>`;
+  // policy
+  h+=`<div class="panel glass"><h3><i data-lucide="scroll-text" class="spark-ico" style="width:15px"></i>Policy intelligence</h3><div id="pol"></div></div>`;
+  setAnalysis(h);
+
+  // forecast graph
+  drawForecast(id,c,b);
+  document.querySelectorAll('#hzTabs button').forEach(bt=>bt.onclick=()=>{document.querySelectorAll('#hzTabs button').forEach(x=>x.classList.toggle('on',x===bt));drawForecast(id,c,b,+bt.dataset.h);});
+  // donut (ECharts)
+  drawDonut(c);
+  // scenario wiring
+  wireScenario(id,aqi,c);
+  // recs
+  document.getElementById('recs').innerHTML=(a.ranked_actions||[]).length?a.ranked_actions.map((r,i)=>recCard(r,i)).join(''):'<div class="muted">No standard interventions apply at this AQI level.</div>';
+  ico();
+  // policy
+  document.getElementById('pol').innerHTML=(a.retrieved_policies||[]).map(p=>`
+    <div class="pol" onclick="this.classList.toggle('open')"><b>${p.title}</b> <span class="muted">· ${p.authority}${p.aqi_stage&&p.aqi_stage!=='all'?' · '+p.aqi_stage:''}</span>
+    <div class="p-more">${(p.text||'').slice(0,320)}…<br><span style="color:var(--acc2)">▸ ${p.citation||''}</span></div></div>`).join('');
+}
+
+function recCard(r,i){const p=i===0?['CRITICAL','var(--bad)']:i===1?['HIGH','var(--warn)']:['MEDIUM','var(--acc)'];
+  const o=r.objectives||{};
+  return `<div class="rec" style="border-left-color:${p[1]}"><div class="r-top"><b>${r.title}</b>
+    <span class="prio" style="background:${p[1]};color:#04121f">${p[0]}</span></div>
+    <div class="r-meta"><span>AQI <b style="color:${color(r.aqi_after)}">${r.aqi_before}→${r.aqi_after}</b></span>
+    <span>Improve <b>${r.improvement_pct}%</b></span><span>Conf <b>${Math.round((r.confidence||.6)*100)}%</b></span>
+    <span>Feasibility <b>${Math.round((o.feasibility||.5)*100)}%</b></span>
+    <span>Cost <b>${o.cost!=null?Math.round((1-o.cost)*100)+'% lo':'—'}</b></span>
+    <span>Targets <b>${r.target_source}</b></span></div>
+    <div class="muted" style="margin-top:6px;font-size:11.5px">${(r.rationale||'').slice(0,150)}</div>
+    ${(r.citations||[]).filter(Boolean).length?`<div class="muted" style="margin-top:4px;font-size:11px;color:var(--acc2)">▸ ${r.citations.filter(Boolean).join(' · ')}</div>`:''}</div>`;}
+
+/* ---------- charts ---------- */
+function drawForecast(id,c,b,hz){
+  Plotly.purge('trend');
+  j('/forecast?ward_id='+encodeURIComponent(id)+'&time_index='+tIndex).then(fc=>{
+    const H=fc.history||[],x=H.map(p=>p.time),y=H.map(p=>p.aqi),pt=c.timestamp,lastx=x[x.length-1]||pt;
+    const scale=hz?hz/24:1,after=c.predicted_aqi;
+    Plotly.newPlot('trend',[
+      {x:[lastx,pt,pt,lastx],y:[c.aqi_low,c.aqi_low,c.aqi_high,c.aqi_high],fill:'toself',mode:'none',fillcolor:hexa(b.color,.16),hoverinfo:'skip',name:'p10–p90'},
+      {x,y,mode:'lines',line:{color:var2('--acc'),width:2.2,shape:'spline'},name:'observed'},
+      {x:[lastx,pt],y:[y[y.length-1]||after,after],mode:'lines',line:{color:b.color,width:2,dash:'dot'},name:'forecast'},
+      {x:[pt],y:[after],mode:'markers',marker:{color:b.color,size:12,line:{color:'#fff',width:1.5}},name:'+'+(hz||24)+'h'},
+    ],lay('AQI'),cfg());
+  });
+}
+function drawDonut(c){
+  const el=echarts.init(document.getElementById('donut'),null,{renderer:'canvas'});
+  const ds=c.dominant_sources||{};const data=Object.entries(ds).map(([k,v])=>({name:k,value:v,itemStyle:{color:srcColor(k)}}));
+  el.setOption({tooltip:{trigger:'item',formatter:'{b}: {d}%'},
+    series:[{type:'pie',radius:['52%','78%'],avoidLabelOverlap:true,padAngle:2,itemStyle:{borderRadius:6,borderColor:var2('--surface'),borderWidth:2},
+      label:{color:var2('--txt'),fontSize:11,formatter:'{b}\n{d}%'},data,animationDuration:700}],
+    graphic:{type:'text',left:'center',top:'center',style:{text:Math.round(c.source_confidence*100)+'%\nconf.',fill:var2('--mut'),fontSize:13,textAlign:'center'}}});
+  window.addEventListener('resize',()=>el.resize());
+}
+async function loadExplain(id){
+  document.getElementById('shapWrap').innerHTML='<span class="spin"></span> <span class="muted">Computing SHAP + GNNExplainer…</span>';
+  try{const cx=await j('/context?ward_id='+encodeURIComponent(id)+'&explain=true&time_index='+tIndex);const e=cx.explanations||{};
+    const d=(e.top_feature_drivers||[]).slice().reverse();
+    document.getElementById('shapWrap').innerHTML='<div id="shap" style="height:250px"></div>';
+    Plotly.newPlot('shap',[{type:'bar',orientation:'h',x:d.map(x=>x.shap_aqi),y:d.map(x=>x.feature),
+      marker:{color:d.map(x=>x.shap_aqi>0?var2('--bad'):var2('--good'))},text:d.map(x=>(x.shap_aqi>0?'+':'')+x.shap_aqi),textposition:'auto'}],
+      {...lay('SHAP → AQI (pts)'),margin:{l:135,r:12,t:8,b:26}},cfg());
+    drawGnn(id,e.influential_neighbours||[]);
+  }catch(err){document.getElementById('shapWrap').innerHTML='<span class="muted">Error: '+err.message+'</span>';}
+}
+function drawGnn(id,nb){
+  const el=document.getElementById('gnn');el.classList.remove('muted');el.textContent='';
+  const chart=echarts.init(el);const center=layerBy[id];
+  const nodes=[{name:center.ward_name,symbolSize:46,itemStyle:{color:color(center.aqi)},label:{show:true,color:'#fff',fontSize:11}}];
+  const links=[];
+  nb.forEach(n=>{const w=LAYERS.find(x=>x.ward_name===n.neighbour_name);
+    nodes.push({name:n.neighbour_name,symbolSize:20+n.importance*34,itemStyle:{color:w?color(w.aqi):'#5a7'},label:{show:true,color:var2('--mut'),fontSize:10}});
+    links.push({source:center.ward_name,target:n.neighbour_name,lineStyle:{width:1+n.importance*7,color:var2('--acc'),opacity:.55,curveness:.15},value:n.importance});});
+  chart.setOption({tooltip:{formatter:o=>o.dataType==='edge'?`influence ${o.value.toFixed(2)}`:o.name},
+    series:[{type:'graph',layout:'force',roam:true,force:{repulsion:220,edgeLength:90},
+      data:nodes,links:links,lineStyle:{curveness:.15},emphasis:{focus:'adjacency'},animationDuration:800}]});
+  drawNeighbourLines(id,nb);
+}
+function drawNeighbourLines(id,nb){neighLines.forEach(l=>map.removeLayer(l));neighLines=[];
+  const f=[layerBy[id].lat,layerBy[id].lon];nb.forEach(n=>{const w=LAYERS.find(x=>x.ward_name===n.neighbour_name);
+    if(w)neighLines.push(L.polyline([f,[w.lat,w.lon]],{color:var2('--acc'),weight:1+n.importance*6,opacity:.6}).addTo(map));});}
+
+/* ---------- Scenario Builder ---------- */
+function scenarioHtml(id,aqi){
+  const rows=Object.entries(REF.sliders).map(([k,m])=>`
+    <div class="slider-row"><span class="sl-lab"><span class="li"><i data-lucide="${m.icon}" style="width:14px"></i></span>${m.label}</span>
+    <input type="range" min="0" max="100" value="0" data-k="${k}" class="scl"/>
+    <span class="sl-val" id="sv-${k}">0%</span></div>`).join('');
+  return `<div class="panel glass" style="border:1px solid var(--line2)"><h3><i data-lucide="sliders-horizontal" class="spark-ico" style="width:15px"></i>Scenario Builder — Intervention Simulator</h3>
+    ${rows}
+    <div style="display:flex;gap:8px;margin-top:12px"><button class="btn primary" id="runSim"><i data-lucide="play" style="width:15px"></i> Run Simulation</button>
+    <button class="btn" id="resetSim"><i data-lucide="rotate-ccw" style="width:15px"></i> Reset</button></div>
+    <div class="cmp" id="simCmp" style="margin-top:14px"><div><div class="muted">Current forecast</div><div class="big" style="color:${color(aqi)}">${aqi}</div></div>
+      <div class="arrow">→</div><div><div class="muted">Simulated</div><div class="big" id="simAfter">${aqi}</div></div></div>
+    <div id="simImp" class="muted" style="text-align:center;margin-top:4px"></div>
+    <div id="simSrc" style="height:150px;margin-top:8px"></div>
+    <div id="simRec" class="advice" style="display:none;margin-top:8px"></div></div>`;
+}
+function wireScenario(id,aqi,c){
+  document.querySelectorAll('.scl').forEach(s=>s.oninput=()=>document.getElementById('sv-'+s.dataset.k).textContent=s.value+'%');
+  document.getElementById('resetSim').onclick=()=>{document.querySelectorAll('.scl').forEach(s=>{s.value=0;document.getElementById('sv-'+s.dataset.k).textContent='0%';});
+    document.getElementById('simAfter').textContent=aqi;document.getElementById('simAfter').style.color='';document.getElementById('simImp').textContent='';
+    document.getElementById('simRec').style.display='none';Plotly.purge('simSrc');};
+  document.getElementById('runSim').onclick=async()=>{
+    const sliders={};document.querySelectorAll('.scl').forEach(s=>{if(+s.value>0)sliders[s.dataset.k]=+s.value;});
+    const btn=document.getElementById('runSim');btn.innerHTML='<span class="spin"></span> Simulating…';
+    const r=await j('/simulate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ward_id:id,sliders,time_index:tIndex})});
+    btn.innerHTML='<i data-lucide="play" style="width:15px"></i> Run Simulation';ico();
+    const af=document.getElementById('simAfter');animCount(af,r.aqi_after);af.style.color=color(r.aqi_after);
+    document.getElementById('simImp').innerHTML=`<b style="color:var(--good)">${r.delta>0?'+':''}${r.delta} AQI</b> · ${r.improvement_pct}% cleaner air`;
+    const rec=document.getElementById('simRec');rec.style.display='block';rec.textContent='💡 '+r.recommendation;
+    // before/after source bars
+    const keys=Object.keys(r.before_sources);
+    Plotly.newPlot('simSrc',[
+      {type:'bar',name:'before',x:keys,y:keys.map(k=>r.before_sources[k]),marker:{color:'rgba(140,160,190,.5)'}},
+      {type:'bar',name:'after',x:keys,y:keys.map(k=>r.after_sources[k]||0),marker:{color:keys.map(srcColor)}}],
+      {...lay('source share'),barmode:'group',showlegend:true,legend:{font:{color:var2('--mut'),size:10},orientation:'h'},margin:{l:34,r:10,t:8,b:24}},cfg());
+  };
+}
+
+async function compare(a,b){
+  setAnalysis('<div class="panel glass empty"><span class="spin"></span> Comparing wards…</div>');
+  const [x,y]=await Promise.all([j('/advise?ward_id='+a+'&time_index='+tIndex),j('/advise?ward_id='+b+'&time_index='+tIndex)]);
+  const col=o=>{const c=o.context,bd=band(c.predicted_aqi);return `<div class="panel glass">
+    <div class="num" style="color:${bd.color};font-size:34px">${c.predicted_aqi}</div><b>${c.ward_name}</b>
+    <div><span class="pill" style="background:${bd.color}">${c.aqi_band}</span></div>
+    <div class="muted" style="margin-top:6px">Sources: ${Object.keys(c.dominant_sources).join(', ')}</div>
+    <div class="muted" style="margin-top:4px"><b style="color:var(--txt)">Top action:</b> ${(o.ranked_actions[0]||{}).title||'—'}</div></div>`;};
+  setAnalysis(`<div class="panel glass"><h3><i data-lucide="git-compare" style="width:15px"></i>Ward comparison</h3></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">${col(x)}${col(y)}</div>`);
+  cmpMode=false;cmpFirst=null;document.getElementById('cmp').style.color='';ico();
+}
+
+/* ---------- helpers ---------- */
+function fmt(v){return v==null?'–':(+v).toFixed(1);}
+function var2(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()||'#889';}
+function hexa(c,a){if(c[0]!=='#')return c;const n=parseInt(c.slice(1),16);return`rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;}
+function lay(t){return{margin:{l:38,r:12,t:8,b:26},paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'rgba(0,0,0,0)',
+  font:{color:var2('--mut'),size:11},showlegend:false,xaxis:{gridcolor:var2('--line'),zeroline:false},
+  yaxis:{gridcolor:var2('--line'),zeroline:false,title:{text:t,font:{size:10}}}};}
+function cfg(){return{displayModeBar:false,responsive:true};}
+function toggleTheme(){const h=document.documentElement;h.dataset.theme=h.dataset.theme==='dark'?'light':'dark';
+  document.querySelector('#theme i').setAttribute('data-lucide',h.dataset.theme==='dark'?'sun':'moon');ico();
+  if(curWard)selectWard(curWard);restyle();}
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+# =====================================================================
+# Delhi Ward-Level AQI Forecasting + Advisor — Python dependencies
+# Tested with Python 3.10 on Windows. Versions are the ones this project
+# was validated against; newer patch releases are generally fine.
+# =====================================================================
+
+# ---- forecasting stack (frozen pipeline) ----
+torch==2.13.0            # install the CUDA build separately if you have a GPU:
+                         #   pip install torch --index-url https://download.pytorch.org/whl/cu126
+torch-geometric==2.8.0   # pure-python; no torch-scatter/torch-sparse needed
+scikit-learn==1.7.2
+lightgbm==4.7.0
+shap==0.49.1
+numpy==1.26.4
+pandas==2.3.3
+pyarrow>=15
+scipy==1.15.3
+geopandas==1.1.4
+shapely==2.1.2
+networkx==3.4.2
+joblib>=1.3
+
+# ---- advisor: retrieval / RAG / knowledge graph ----
+chromadb==1.5.7
+sentence-transformers==5.4.0
+transformers>=4.44
+rank-bm25==0.2.2
+langchain==1.2.15
+langchain-groq==1.1.2     # cloud LLM (Groq — hosts Gemma). No local models.
+
+# ---- advisor: document ingestion ----
+pypdf==6.14.2
+python-docx==1.2.0
+docx2txt==0.9
+beautifulsoup4==4.14.3
+pytesseract==0.3.13       # OCR fallback (needs system `tesseract` + `pdf2image`/poppler)
+PyYAML>=6
+
+# ---- advisor: API + dashboard ----
+fastapi==0.139.2
+uvicorn==0.44.0
+pydantic>=2
+plotly==6.7.0
+folium==0.20.0
+
+python-dotenv>=1.0

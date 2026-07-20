@@ -1,0 +1,123 @@
+{
+  "project": "AQI Forecasting — Historical Data Pipeline",
+  "region": "Delhi NCR",
+  "bbox_wsen": [76.8, 28.2, 77.6, 28.9],
+  "date_range": "last 3 years (rolling, see config.py)",
+  "datasets": [
+    {
+      "id": "aqi",
+      "name": "CPCB Historical AQI",
+      "source": "OpenAQ v3 API (archives CPCB station data)",
+      "url": "https://api.openaq.org/v3",
+      "format": "JSON (daily aggregates per station/pollutant/year)",
+      "folder": "data/raw/aqi/",
+      "auth": "Free API key (OPENAQ_API_KEY)",
+      "license": "CC BY 4.0",
+      "cost": "free"
+    },
+    {
+      "id": "weather",
+      "name": "ERA5 Historical Weather",
+      "source": "Copernicus Climate Data Store (CDS API)",
+      "url": "https://cds.climate.copernicus.eu",
+      "format": "NetCDF (hourly, monthly files)",
+      "folder": "data/raw/weather/",
+      "auth": "Free CDS account (~/.cdsapirc or CDSAPI_KEY)",
+      "license": "Copernicus License (free)",
+      "cost": "free"
+    },
+    {
+      "id": "fire",
+      "name": "NASA FIRMS Historical Fire",
+      "source": "FIRMS Area API, VIIRS_SNPP_SP archive",
+      "url": "https://firms.modaps.eosdis.nasa.gov/api/",
+      "format": "CSV (10-day windows)",
+      "folder": "data/raw/fire/",
+      "auth": "Free map key (FIRMS_MAP_KEY)",
+      "license": "NASA open data",
+      "cost": "free"
+    },
+    {
+      "id": "sentinel5p",
+      "name": "Sentinel-5P Atmospheric Data (NO2, SO2, CO, Aerosol Index)",
+      "source": "Copernicus Data Space Ecosystem (OData catalog)",
+      "url": "https://dataspace.copernicus.eu",
+      "format": "JSON product catalogs (granule .nc downloads are selective, see README)",
+      "folder": "data/raw/satellite/sentinel5p/",
+      "auth": "None for catalog; free account for granule download",
+      "license": "Copernicus free & open",
+      "cost": "free"
+    },
+    {
+      "id": "modis",
+      "name": "MODIS AOD (MCD19A2 MAIAC 1km)",
+      "source": "NASA LP DAAC via CMR search",
+      "url": "https://cmr.earthdata.nasa.gov",
+      "format": "HDF granules",
+      "folder": "data/raw/satellite/modis/",
+      "auth": "Free Earthdata token (EARTHDATA_TOKEN)",
+      "license": "NASA open data",
+      "cost": "free"
+    },
+    {
+      "id": "roads",
+      "name": "OpenStreetMap Roads (major highways)",
+      "source": "Overpass API",
+      "url": "https://overpass-api.de",
+      "format": "OSM JSON with geometry",
+      "folder": "data/raw/gis/roads/",
+      "auth": "None",
+      "license": "ODbL",
+      "cost": "free"
+    },
+    {
+      "id": "industries",
+      "name": "OpenStreetMap Industries (industrial landuse, factories, power plants)",
+      "source": "Overpass API",
+      "url": "https://overpass-api.de",
+      "format": "OSM JSON with geometry",
+      "folder": "data/raw/gis/industries/",
+      "auth": "None",
+      "license": "ODbL",
+      "cost": "free"
+    },
+    {
+      "id": "landuse",
+      "name": "ESA WorldCover 10m Land Cover (2021 v200)",
+      "source": "ESA WorldCover public AWS bucket",
+      "url": "https://esa-worldcover.org",
+      "format": "GeoTIFF (3x3 degree tile N27E075)",
+      "folder": "data/raw/gis/landuse/",
+      "auth": "None",
+      "license": "CC BY 4.0",
+      "cost": "free"
+    },
+    {
+      "id": "dem",
+      "name": "SRTM DEM 30m",
+      "source": "AWS Terrain Tiles (skadi) public bucket",
+      "url": "https://registry.opendata.aws/terrain-tiles/",
+      "format": "HGT (gzip), tiles N28E076 + N28E077",
+      "folder": "data/raw/gis/dem/",
+      "auth": "None",
+      "license": "Public domain (NASA SRTM)",
+      "cost": "free"
+    },
+    {
+      "id": "population",
+      "name": "WorldPop Population (India 1km UN-adjusted, 2020)",
+      "source": "WorldPop direct download",
+      "url": "https://www.worldpop.org",
+      "format": "GeoTIFF",
+      "folder": "data/raw/gis/population/",
+      "auth": "None",
+      "license": "CC BY 4.0",
+      "cost": "free"
+    }
+  ],
+  "rules": {
+    "skip_existing": true,
+    "protected_folders": ["data/realtime/"],
+    "no_preprocessing": true
+  }
+}

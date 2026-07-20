@@ -1,0 +1,178 @@
+{
+  "dynamic_grid_norm.parquet": {
+    "RobustScaler": [
+      "pm2_5",
+      "pm10",
+      "nitrogen_dioxide",
+      "sulphur_dioxide",
+      "carbon_monoxide",
+      "ozone",
+      "aerosol_optical_depth",
+      "dust",
+      "aqi",
+      "aqi_lag_1h",
+      "aqi_lag_3h",
+      "aqi_lag_6h",
+      "aqi_lag_12h",
+      "aqi_lag_24h",
+      "aqi_lag_48h",
+      "pm2_5_lag_1h",
+      "pm2_5_lag_3h",
+      "pm2_5_lag_6h",
+      "pm2_5_lag_12h",
+      "pm2_5_lag_24h",
+      "pm2_5_lag_48h",
+      "pm10_lag_1h",
+      "pm10_lag_3h",
+      "pm10_lag_6h",
+      "pm10_lag_12h",
+      "pm10_lag_24h",
+      "pm10_lag_48h",
+      "nitrogen_dioxide_lag_1h",
+      "nitrogen_dioxide_lag_3h",
+      "nitrogen_dioxide_lag_6h",
+      "nitrogen_dioxide_lag_12h",
+      "nitrogen_dioxide_lag_24h",
+      "nitrogen_dioxide_lag_48h",
+      "aqi_roll_mean_6h",
+      "aqi_roll_mean_24h",
+      "aqi_roll_max_24h",
+      "aqi_roll_std_24h",
+      "pm2_5_roll_mean_6h",
+      "pm2_5_roll_mean_24h",
+      "pm2_5_roll_max_24h",
+      "pm2_5_roll_std_24h",
+      "aqi_diff_1h",
+      "aqi_diff_24h"
+    ],
+    "StandardScaler": [
+      "temperature_2m",
+      "relative_humidity_2m",
+      "dew_point_2m",
+      "precipitation",
+      "surface_pressure",
+      "wind_speed_10m",
+      "wind_gusts_10m",
+      "boundary_layer_height",
+      "ventilation_index",
+      "stagnation_index",
+      "pm25_pm10_ratio",
+      "dust_fraction",
+      "so2_no2_ratio"
+    ],
+    "log1p+StandardScaler": [
+      "fire_count",
+      "fire_frp_sum"
+    ],
+    "left_as_is (bounded/binary)": [
+      "hour_sin",
+      "hour_cos",
+      "month_sin",
+      "month_cos",
+      "dow_sin",
+      "dow_cos",
+      "wind_dir_sin",
+      "wind_dir_cos",
+      "is_weekend",
+      "is_rush_hour",
+      "is_winter",
+      "is_stubble_season",
+      "is_diwali_window",
+      "wind_from_nw",
+      "fire_upwind"
+    ],
+    "kept_raw (ids/targets/leak)": [
+      "target_aqi_t24",
+      "target_aqi_t48",
+      "target_aqi_t72",
+      "persistence_aqi_t24",
+      "point_id",
+      "time",
+      "split",
+      "dominant_pollutant",
+      "pm2_5_raw",
+      "pm10_raw",
+      "wind_direction_10m"
+    ]
+  },
+  "nodes_static_norm.parquet": {
+    "log1p+StandardScaler": [
+      "ward_area_km2",
+      "road_km_3km",
+      "road_capacity_3km",
+      "road_km_in_ward",
+      "road_capacity_in_ward",
+      "road_km_per_km2",
+      "industry_count_5km",
+      "industry_count_in_ward",
+      "vulnerable_sites_3km",
+      "vulnerable_sites_in_ward",
+      "population_sum",
+      "population_density_mean",
+      "emis_power_co",
+      "emis_industry_co",
+      "emis_residential_co",
+      "emis_transport_co",
+      "emis_power_nox",
+      "emis_industry_nox",
+      "emis_residential_nox",
+      "emis_transport_nox",
+      "emis_power_pm25",
+      "emis_industry_pm25",
+      "emis_residential_pm25",
+      "emis_transport_pm25",
+      "emis_power_so2",
+      "emis_industry_so2",
+      "emis_residential_so2",
+      "emis_transport_so2",
+      "emis_total_pm25",
+      "emis_total_co",
+      "emis_total_so2",
+      "emis_total_nox"
+    ],
+    "StandardScaler": [
+      "elevation_mean",
+      "lu_builtup_fraction",
+      "lu_tree_fraction"
+    ],
+    "kept_raw (ids/categorical)": [
+      "ward_id",
+      "ward_name",
+      "ward_lat",
+      "ward_lon",
+      "point_id",
+      "node_idx",
+      "lu_majority_class"
+    ]
+  },
+  "edges_norm.parquet": {
+    "added": [
+      "bearing_sin",
+      "bearing_cos",
+      "dist_km_z"
+    ],
+    "kept_raw": [
+      "src",
+      "dst",
+      "src_ward",
+      "dst_ward",
+      "bearing_deg",
+      "dist_km"
+    ]
+  },
+  "labels_station_clean.parquet": {
+    "not_normalised (ground truth)": [
+      "aqi_station"
+    ],
+    "label_nulls_kept_drop_at_train": [
+      "pm25_pm10_ratio_obs",
+      "source_class_obs"
+    ]
+  },
+  "rules": {
+    "scalers_fit_on": "train split only (dynamic); all wards (static)",
+    "targets": "never normalised, never imputed",
+    "warmup_dropped_h": 48,
+    "horizon_tail_dropped_h": 72
+  }
+}

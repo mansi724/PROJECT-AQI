@@ -1,0 +1,60 @@
+# ============================================================
+# Delhi AQI Intelligence — .gitignore
+# Goal: commit code + docs + the SMALL trainable dataset + checkpoints.
+# Exclude: secrets, the empty/broken venv, huge raw data, rebuildable caches.
+# ============================================================
+
+# ---- secrets (NEVER commit) ----
+.env
+*.key
+*.pem
+
+# ---- python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ipynb_checkpoints/
+
+# ---- virtual environment (broken + 1.8 GB; teammates make their own) ----
+venv/
+.venv/
+env/
+
+# ---- logs / scratch ----
+*.log
+
+# ============================================================
+# DATA — this is the important part
+# ============================================================
+
+# EXCLUDE the huge deprecated flat datasets (3.6 GB, not used by the model/app)
+data/final/
+
+# EXCLUDE big raw source data (4 GB) and rebuildable intermediates, but KEEP a
+# few small essential files. Git can only re-include a file if every parent dir
+# is un-ignored first, so we descend level by level (use /* , never /**).
+data/raw/*
+!data/raw/gis/
+data/raw/gis/*
+!data/raw/gis/wards/
+data/raw/gis/wards/*
+!data/raw/gis/wards/delhi_wards.geojson
+
+data/processed/*
+!data/processed/cpcb_ground_truth.csv
+!data/processed/ward_emissions.csv
+!data/processed/ward_features.csv
+!data/processed/ward_grid_map.csv
+
+# EXCLUDE rebuildable / runtime-generated data
+# (comments must be on their own line — gitignore has no inline comments)
+# vector index — rebuilt with `vector_store --reset`
+data/kb/chroma/
+# user-added PDFs (may be large / copyrighted)
+data/kb/raw_docs/
+data/explain/
+data/serving/
+data/realtime/
+
+# KEEP (do NOT ignore): data/gnn/, data/gnn_processed/, data/kb/corpus/,
+# data/kb/*.jsonl, data/kb/knowledge_graph.gpickle, models/checkpoints/*.pt

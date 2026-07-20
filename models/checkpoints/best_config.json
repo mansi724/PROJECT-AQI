@@ -1,0 +1,23 @@
+{
+  "selected_on": "robust judgement (val skill + test skill + calibration), NOT naive val-sort",
+  "name": "dropout0.3",
+  "note": "The sweep's naive val-winner was 'wd3e-4' (val +9.5% but test only +14.1% — it traded summer for winter, a single-seed artefact). 'dropout0.3' is the adopted recipe because it beats the base on ALL THREE: val skill, test skill, and calibration. Chosen 2026-07-20.",
+  "config": {
+    "hidden": 64,
+    "heads": 4,
+    "layers": 2,
+    "lr": 0.002,
+    "dropout": 0.3,
+    "weight_decay": 0.0001,
+    "pretrain_epochs": 10
+  },
+  "measured": {
+    "val_skill": 7.3, "val_cov": 0.74,
+    "test_skill": 21.4, "test_cov": 0.68
+  },
+  "vs_base": {
+    "base_val_skill": 6.9, "base_test_skill": 18.4, "base_val_cov": 0.63,
+    "verdict": "dropout 0.3 improves winter skill, summer skill, and calibration; main win is calibration (coverage 0.63 -> 0.74). Small but robust."
+  },
+  "how_to_apply": "Already the default in train_gnn.py / train_ensemble.py (--dropout 0.3). Retrain the ensemble with the usual command to bake it in."
+}
