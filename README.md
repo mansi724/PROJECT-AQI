@@ -21,7 +21,6 @@
 - [The Dataset](#the-dataset)
 - [How the Three Engines Work](#how-the-three-engines-work)
 - [Results](#results)
-- [Gotchas That Will Save Your Results](#gotchas-that-will-save-your-results)
 - [Rebuilding the Dataset](#rebuilding-the-dataset)
 - [Limitations](#limitations)
 - [License](#license)
