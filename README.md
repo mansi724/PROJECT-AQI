@@ -249,6 +249,7 @@ flowchart LR
     B --> C["3 · Scale<br/>frozen scalers.joblib"]
     C --> D["4 · Align + write<br/>data/realtime/ + status.json"]
     D --> E["Serve · AQI_REALTIME=1<br/>anchored at latest live hour"]
+```
 ## Results
 
 **Final served model** — 4-member snapshot ensemble (dropout 0.3), horizon 24, conformal intervals.
