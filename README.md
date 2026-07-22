@@ -309,7 +309,4 @@ Stated out loud, because honesty about these matters more than hiding them:
 
 ---
 
-## License
 
-No license has been specified yet. Until one is added, this repository is **all rights reserved**
-by default — add a `LICENSE` file to make reuse terms explicit.
