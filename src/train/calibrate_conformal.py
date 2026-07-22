@@ -11,7 +11,7 @@ Runs per available horizon (24/48/72), calibrates on **val** (the winter split),
 and reports coverage on **test** before vs after. Saves δ to
 `models/checkpoints/conformal.json`; `ForecastService` applies it at serve time.
 
-    python calibrate_conformal.py
+    python -m src.train.calibrate_conformal
 """
 from __future__ import annotations
 
@@ -22,12 +22,12 @@ import numpy as np
 import torch
 
 from advisor.serving import get_forecast_service
-from stgnn_data import load_stgnn, build_supervised_pairs
-from train_gnn import group_by_timestep
-from metrics import interval_coverage
+from src.data.stgnn_data import load_stgnn, build_supervised_pairs
+from src.train.train_gnn import group_by_timestep
+from src.metrics import interval_coverage
 
 TARGET = 0.80                      # nominal p10–p90 coverage
-CKPT = Path(__file__).resolve().parent / "models" / "checkpoints" / "conformal.json"
+CKPT = Path(__file__).resolve().parents[2] / "models" / "checkpoints" / "conformal.json"
 
 
 @torch.no_grad()

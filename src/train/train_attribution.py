@@ -12,7 +12,7 @@ Trains the two LightGBM heads and validates them the honest way:
 Splits come from `split_lab` (chronological, labelled era). Rows with a null
 observed target are dropped (never imputed — see PREPROCESSING.md).
 
-    python train_attribution.py
+    python -m src.train.train_attribution
 =================================================================
 """
 from __future__ import annotations

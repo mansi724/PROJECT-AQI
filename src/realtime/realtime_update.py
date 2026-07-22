@@ -32,9 +32,9 @@ Activate live serving (so the advisor picks these up):
 then (re)start the API.  Run this script from cron/Task Scheduler hourly.
 
 Usage:
-    python realtime_update.py                 # default 10 past + 1 forecast day
-    python realtime_update.py --past 14 --forecast 2
-    python realtime_update.py --dry-run       # fetch + build, don't write
+    python -m src.realtime.realtime_update                 # default 10 past + 1 forecast day
+    python -m src.realtime.realtime_update --past 14 --forecast 2
+    python -m src.realtime.realtime_update --dry-run       # fetch + build, don't write
 =================================================================
 """
 from __future__ import annotations
@@ -50,13 +50,13 @@ import numpy as np
 import pandas as pd
 import requests
 
-import config as C
-from build_gnn_dataset import (
+from src import config as C
+from src.data.build_gnn_dataset import (
     PM25_FACTOR, PM10_FACTOR, cpcb_aqi, add_time_features, add_meteo,
     add_attribution_features, add_lags_rolls, add_targets,
 )
 
-BASE = Path(__file__).resolve().parent
+BASE = Path(__file__).resolve().parents[2]
 GNN = BASE / "data" / "gnn"
 GNN_PROC = BASE / "data" / "gnn_processed"
 OUT = C.REALTIME_DIR                       # data/realtime/  (this script's job)

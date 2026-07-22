@@ -33,7 +33,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from gnn_data import ATTRIBUTION_DYN, ATTRIBUTION_STATIC, EMISSION_FEATURES
+from src.data.gnn_data import ATTRIBUTION_DYN, ATTRIBUTION_STATIC, EMISSION_FEATURES
 
 BASE = Path(__file__).resolve().parent.parent
 PROC = BASE / "data" / "gnn_processed"

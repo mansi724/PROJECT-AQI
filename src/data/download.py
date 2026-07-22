@@ -3,8 +3,8 @@ Historical data download pipeline — Delhi ward-level AQI Forecasting,
 Source Attribution & Action Recommendation project.
 
 Usage:
-    python download.py                    # download everything
-    python download.py weather aqi fire   # only selected datasets
+    python -m src.data.download                    # download everything
+    python -m src.data.download weather aqi fire   # only selected datasets
 
 Rules enforced by this script:
   * Free sources only. Default sources need NO API key.
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import requests
 
-import config as C
+from src import config as C
 
 # ---------------------------------------------------------------------------
 # Safety guard: forbid any write into data/realtime/
@@ -578,7 +578,7 @@ def main():
         except Exception as e:
             log(f"{name}: FAILED — {e}")
     log("Done. Re-run anytime; existing files are skipped.")
-    log("Next: python build_dataset.py  →  data/processed/final_dataset.csv")
+    log("Next: python -m src.data.build_gnn_dataset  →  data/processed/final_dataset.csv")
 
 
 if __name__ == "__main__":

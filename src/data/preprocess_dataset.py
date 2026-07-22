@@ -23,7 +23,7 @@ Key rules enforced here
     - static / edges: no missing values.
     - labels: aqi_station is complete; Engine-2 label nulls are left in place
       to be DROPPED at engine training time (never imputed).
-Run:  python preprocess_dataset.py
+Run:  python -m src.data.preprocess_dataset
 =================================================================
 """
 import json
@@ -34,7 +34,7 @@ import numpy as np
 import pandas as pd
 from sklearn.preprocessing import RobustScaler, StandardScaler
 
-BASE = Path(__file__).resolve().parent
+BASE = Path(__file__).resolve().parents[2]
 GNN = BASE / "data" / "gnn"
 OUT = BASE / "data" / "gnn_processed"
 OUT.mkdir(parents=True, exist_ok=True)

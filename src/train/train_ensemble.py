@@ -9,7 +9,7 @@ and calibrates the p10/p90 band (each member disagrees a little).
 Every member uses the winning single-model recipe (residual target + dense-grid
 aux loss). Reported through metrics.py as skill vs persistence, same as always.
 
-    python train_ensemble.py --k 4 --residual --aux-grid-weight 0.3 --no-temporal --epochs 45
+    python -m src.train.train_ensemble --k 4 --residual --aux-grid-weight 0.3 --no-temporal --epochs 45
 =================================================================
 """
 from __future__ import annotations
@@ -20,8 +20,8 @@ import copy
 import numpy as np
 import torch
 
-from train_gnn import Trainer
-from metrics import scoreboard, format_scoreboard, interval_coverage
+from src.train.train_gnn import Trainer
+from src.metrics import scoreboard, format_scoreboard, interval_coverage
 
 
 def main():

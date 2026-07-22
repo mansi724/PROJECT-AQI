@@ -197,7 +197,7 @@ def cost_effectiveness(ward_id: str, time_index: int | None = None):
 def explain_global(n_queries: int = 200):
     """3.2 — global feature importance (mean |SHAP| across many ward-hours)."""
     if "shap_global" not in _STATE:
-        from explain_gnn import shap_global
+        from src.explain.explain_gnn import shap_global
         g = shap_global(svc().ctx, n_queries=n_queries)
         _STATE["shap_global"] = [{"feature": r.feature,
                                   "mean_abs_shap_aqi": round(float(r.mean_abs_shap_aqi), 3)}
@@ -208,7 +208,7 @@ def explain_global(n_queries: int = 200):
 @app.get("/explain/stability")
 def explain_stability(ward_id: str, time_index: int | None = None, seeds: int = 3):
     """3.5 — GNNExplainer seed-stability (is the explanation trustworthy?)."""
-    from explain_gnn import gnn_stability
+    from src.explain.explain_gnn import gnn_stability
     s = svc()
     try:
         node = s.ward_to_node(ward_id)

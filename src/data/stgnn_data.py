@@ -42,11 +42,11 @@ import numpy as np
 import pandas as pd
 
 # Reuse the column groups — do not redefine (single source of truth).
-from gnn_data import (
+from src.data.gnn_data import (
     STATIC_FEATURES, DYN_CURRENT, DYN_DERIVED, DYN_SIGNATURE, DYN_HISTORY, LEAK,
 )
 
-BASE = Path(__file__).resolve().parent
+BASE = Path(__file__).resolve().parents[2]
 PROC = BASE / "data" / "gnn_processed"
 REALTIME = BASE / "data" / "realtime"
 

@@ -26,7 +26,7 @@ Shapes
 
 Usage
 -----
-    from gnn_data import load_gnn
+    from src.data.gnn_data import load_gnn
     d = load_gnn(horizon=24)
     x_t = d.node_features(t)          # [N, F_s + F_d] at timestep t
     seq = d.window(t, lookback=24)    # [24, N, F] for a spatio-temporal model
@@ -38,7 +38,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-BASE = Path(__file__).resolve().parent
+BASE = Path(__file__).resolve().parents[2]
 GNN = BASE / "data" / "gnn"
 
 # ---- feature groups -------------------------------------------------------

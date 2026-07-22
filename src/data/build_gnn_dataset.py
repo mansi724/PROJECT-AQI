@@ -27,8 +27,8 @@ Outputs (data/gnn/):
   dynamic_grid.parquet   19 cells x 26,304 h — pollutants, weather, AQI, lags
   labels_station.parquet real CPCB station AQI, mapped to its ward
 
-Run:  python build_gnn_dataset.py            # dynamic grid
-      python build_gnn_dataset.py --labels   # labels only (after CPCB pull)
+Run:  python -m src.data.build_gnn_dataset            # dynamic grid
+      python -m src.data.build_gnn_dataset --labels   # labels only (after CPCB pull)
 =================================================================
 """
 import sys
@@ -37,9 +37,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-import config as C
+from src import config as C
 
-BASE = Path(__file__).resolve().parent
+BASE = Path(__file__).resolve().parents[2]
 GNN = BASE / "data" / "gnn"
 BACKUP = BASE / "data" / "final" / "model_ready_backup.parquet"
 

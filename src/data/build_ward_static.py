@@ -18,7 +18,7 @@ Outputs (data/gnn/):
   nodes_static.parquet  289 wards x static features (real, per-ward)
   edges.parquet         ward adjacency: shared-border + k-nearest fallback
 
-Run:  python build_ward_static.py
+Run:  python -m src.data.build_ward_static
 =================================================================
 """
 import json
@@ -29,9 +29,9 @@ import numpy as np
 import pandas as pd
 from shapely.geometry import LineString, Point
 
-import config as C
+from src import config as C
 
-BASE = Path(__file__).resolve().parent
+BASE = Path(__file__).resolve().parents[2]
 GNN = BASE / "data" / "gnn"
 BACKUP = BASE / "data" / "final" / "model_ready_backup.parquet"
 

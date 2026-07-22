@@ -14,8 +14,8 @@ Design notes (learned the hard way):
   * SCOPED — only PM25/PM10/NO2 by default. PM dominates the CPCB AQI in
     Delhi; pulling all 6 params triples runtime for little label value.
 
-Run:  python refresh_ground_truth.py            # pull + assemble
-      python refresh_ground_truth.py --assemble # assemble cache only
+Run:  python -m src.data.refresh_ground_truth            # pull + assemble
+      python -m src.data.refresh_ground_truth --assemble # assemble cache only
 =================================================================
 """
 import json
@@ -28,9 +28,9 @@ from pathlib import Path
 import pandas as pd
 import requests
 
-import config as C
+from src import config as C
 
-BASE = Path(__file__).resolve().parent
+BASE = Path(__file__).resolve().parents[2]
 OUT_DIR = C.DIRS["aqi_openaq"]
 STATIONS = OUT_DIR / "stations.json"
 PROC = C.PROCESSED_DIR

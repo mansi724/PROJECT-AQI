@@ -23,8 +23,8 @@ import numpy as np
 import pandas as pd
 import torch
 
-from gnn_data import ATTRIBUTION_DYN, ATTRIBUTION_STATIC
-from explain_gnn import ExplainContext
+from src.data.gnn_data import ATTRIBUTION_DYN, ATTRIBUTION_STATIC
+from src.explain.explain_gnn import ExplainContext
 from models.attribution import SourceAttributor
 from advisor.config import CONFIG, AdvisorConfig, aqi_band, grap_stage
 from advisor.feature_space import get_feature_scaler, get_raw_dynamics, wind_compass
@@ -383,13 +383,13 @@ class ForecastService:
         return out
 
     def shap_local(self, node_idx: int, t: int, top: int = 8) -> list[dict]:
-        from explain_gnn import shap_ward
+        from src.explain.explain_gnn import shap_ward
         df, _neigh = shap_ward(self.ctx, node_idx, t)
         return [{"feature": r.feature, "shap_aqi": round(float(r.shap_aqi), 2)}
                 for r in df.head(top).itertuples()]
 
     def gnn_neighbours(self, node_idx: int, t: int, top: int = 6) -> list[dict]:
-        from explain_gnn import gnn_explain_ward
+        from src.explain.explain_gnn import gnn_explain_ward
         edges_df, _ = gnn_explain_ward(self.ctx, node_idx, t, epochs=120)
         return [{"neighbour_ward": str(r.neighbour_ward), "neighbour_name": str(r.neighbour_name),
                  "importance": round(float(r.importance), 3)}

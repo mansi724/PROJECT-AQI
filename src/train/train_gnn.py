@@ -17,8 +17,8 @@ Guardrails honoured (PLAN.md)
 * Every number is reported through `metrics.py` as skill vs persistence.
 * `--no-temporal` runs the no-history ablation (must still beat persistence).
 
-    python train_gnn.py --horizon 24 --epochs 30
-    python train_gnn.py --horizon 24 --epochs 30 --no-temporal   # ablation
+    python -m src.train.train_gnn --horizon 24 --epochs 30
+    python -m src.train.train_gnn --horizon 24 --epochs 30 --no-temporal   # ablation
 =================================================================
 """
 from __future__ import annotations
@@ -31,11 +31,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from stgnn_data import load_stgnn, build_supervised_pairs
+from src.data.stgnn_data import load_stgnn, build_supervised_pairs
 from models.gnn_forecast import WardGraphTransformer, pinball_loss
-from metrics import scoreboard, format_scoreboard, interval_coverage, pinball_loss as np_pinball
+from src.metrics import scoreboard, format_scoreboard, interval_coverage, pinball_loss as np_pinball
 
-BASE = Path(__file__).resolve().parent
+BASE = Path(__file__).resolve().parents[2]
 CKPT_DIR = BASE / "models" / "checkpoints"
 
 

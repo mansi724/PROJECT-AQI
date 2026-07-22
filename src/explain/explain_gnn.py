@@ -15,8 +15,8 @@ Both run on the **snapshot model** (`--no-temporal` checkpoint), because its
 not GRU hidden state. The snapshot model is therefore both the no-history
 ablation AND the explainable model — one artefact, two jobs.
 
-    python explain_gnn.py --ward <ward_id> --time-index <t>
-    python explain_gnn.py --global-shap 300     # global importance over 300 queries
+    python -m src.explain.explain_gnn --ward <ward_id> --time-index <t>
+    python -m src.explain.explain_gnn --global-shap 300     # global importance over 300 queries
 =================================================================
 """
 from __future__ import annotations
@@ -28,10 +28,10 @@ import numpy as np
 import pandas as pd
 import torch
 
-from stgnn_data import load_stgnn
+from src.data.stgnn_data import load_stgnn
 from models.gnn_forecast import WardGraphTransformer
 
-BASE = Path(__file__).resolve().parent
+BASE = Path(__file__).resolve().parents[2]
 CKPT_DIR = BASE / "models" / "checkpoints"
 OUT_DIR = BASE / "data" / "explain"
 
@@ -46,7 +46,7 @@ class ExplainContext:
         if not ckpt_path.exists():
             raise FileNotFoundError(
                 f"{ckpt_path} not found — train the snapshot model first:\n"
-                f"  python train_gnn.py --horizon {horizon} --no-temporal")
+                f"  python -m src.train.train_gnn --horizon {horizon} --no-temporal")
         ckpt = torch.load(ckpt_path, map_location=self.device, weights_only=False)
         self.d = load_stgnn(horizon=horizon, realtime=realtime)
         self.y_mu, self.y_sd = ckpt["y_mu"], ckpt["y_sd"]
