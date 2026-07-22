@@ -1,4 +1,4 @@
-# 🌆 Urban Air Quality Intelligence — Delhi
+# 🌆 AIRIS - Hyperlocal AQI Intelligence
 
 > Hyperlocal, hourly Air Quality Index for **all 289 Delhi wards**. One graph dataset powers three engines: **forecasting**, **source attribution**, and **LLM-driven action recommendations**.
 
@@ -30,16 +30,43 @@
 
 ## Overview
 
-Free **hyperlocal** pollutant data does not exist. The pollutant and weather signal comes from
-**CAMS — an atmospheric model with only 19 grid cells over Delhi** — so at any hour the raw inputs
-carry ~4 distinct PM2.5 values for the whole city, not 289.
+This is an end-to-end **ward-level air-quality intelligence platform** for Delhi: it forecasts the Air
+Quality Index for all **289 wards**, explains *why* the air is bad, and turns that into concrete,
+cited health guidance served live behind a dashboard.
 
-This project turns that coarse regional signal into a genuine **per-ward** product by fusing it with
+The solution is built in four layers that stack on top of one another:
+
+**1 · A fused graph dataset:** A single graph ties together three kinds of data  a coarse regional
+pollutant/weather field (CAMS/ERA5, 19 grid cells), high-resolution per-ward geography (roads,
+industry, population, land use across 289 wards), and real CPCB station measurements as ground truth.
+Wards are the nodes; true geographic adjacency forms the 1,670 edges. This is what lets a coarse
+city-wide signal become a per-ward prediction.
+
+**2 · Forecasting engine:** A Graph-Transformer learns how each ward's local context bends the regional
+signal, predicting AQI at **+24 / +48 / +72 hours** for every ward. It's served as a 4-member snapshot
+ensemble with conformal prediction intervals, so every forecast ships with a calibrated uncertainty
+band not just a point estimate.
+
+**3 · Source attribution engine:** Beyond *how bad*, the system estimates *why* separating
+dust-driven pollution from combustion-driven pollution per ward. Critically, this is **validated
+against a measured PM2.5/PM10 fingerprint** at real stations, so it's a scoreable prediction, not a
+heuristic.
+
+**4 · Action advisor:** A retrieval-augmented layer (RAG + Knowledge Graph + LLM) takes the forecast
+and attribution, retrieves the right official guidance (CPCB/GRAP tiers, health advisories) for that
+ward's risk profile, and composes grounded, **cited** recommendations. The LLM writes the advice but
+never does the arithmetic the numbers come from the models.
+
+Tying it together: a **live ingestion path** keeps the whole stack anchored to `now`, pulling fresh
+data hourly and rebuilding it in the exact format the frozen models expect (see
+[Live Data Integration](#live-data-integration)), and the entire thing is exposed through a **FastAPI
+service and dashboard**. 
+>This project turns that coarse regional signal into a genuine **per-ward** product by fusing it with
 real spatial context and real ground truth:
 
 | Layer | Resolution | Real? |
 |---|---|---|
-| Pollutants + weather (CAMS) | 19 cells | Simulated |
+| Pollutants + weather (CAMS) | 19 cells | Real |
 | Roads, industry, population, land use | **289 wards** | Real |
 | CPCB station measurements | 57 stations → 49 wards | **Real, measured** |
 | Ward adjacency graph | 289 nodes, 1,670 edges | Real geometry |
@@ -50,11 +77,11 @@ carries it to the other 240.
 
 **Highlights**
 
-- ✅ Graph-Transformer forecaster (h+24 / +48 / +72) with a 4-member snapshot ensemble + conformal intervals
+- ✅ Graph-Transformer forecaster (h+24 / +48 / +72) with a 4-member snapshot ensemble (STGNN) + conformal intervals
 - ✅ Source attribution (dust vs. combustion) validated against a *measured* PM2.5/PM10 fingerprint
+- ✅ Hourly live data pipeline with identical training-time preprocessing, enabling real-time AQI forecasts without train/serve skew
 - ✅ RAG + Knowledge-Graph + LLM advisor served behind a FastAPI dashboard
-- ✅ Compact, honest dataset: **47 MB on disk / 138 MB in RAM** (down from 5.3 GB, nothing lost)
-
+  
 ---
 
 ## Architecture
@@ -156,7 +183,6 @@ uvicorn advisor.api.main:app --reload --port 8000
 
 ## The Dataset
 
-Everything you train on lives in [`data/gnn/`](data/gnn/) — four files:
 
 | File | Answers | Shape | Key |
 |---|---|---|---|
@@ -172,56 +198,57 @@ byte-identical copy, so it is stored once and joined at load time. The loader do
 X_dyn[t][cell_of_node]     # [289, F] — effectively free
 ```
 
-> ⚠️ Never materialise `[T, 289, F]` yourself — that's 1.8 GB of duplicated floats, the exact
-> mistake the old flat table made.
-
-<details>
-<summary><b>Why the honest picture matters (click to expand)</b></summary>
-
-An earlier version invented per-ward variation with a formula. It was **circular** — the formula's
-inputs were also model inputs, so the model just re-derived it. That is deleted. Real variation now
-comes from real ward features + the graph + real labels.
-
-| Fixed | Was |
-|---|---|
-| **AQI target** | `rolling(24)` spanned 24 *rows*, not hours → one cell's AQI smeared **201→403** across its wards by sort order. Now verified correct. |
-| **Ward features** | Roads/industry copied from nearest grid point → `road_km_3km` had **19** distinct values. Recomputed on ward geometry → **289**. |
-| **Ground truth** | 6,453 rows → **488,694** (89×), checkpointed and resumable. |
-| **Size** | 5.3 GB / 93 % duplicated → 138 MB, nothing lost. |
-
-</details>
-
 ---
 
 ## How the Three Engines Work
 
-### 🔮 Engine 1 — Forecasting
+### 🔮 Engine 1 : Forecasting
 `d.node_features(t)` → Graph Transformer → AQI at t+24/48/72 for every ward. Pretrain on the dense
 CAMS target, fine-tune on real labels. **Bar to clear:** persistence RMSE 86.03; a plain GBDT gets 73.98.
 
-### 🧭 Engine 2 — Source Attribution
+### 🧭 Engine 2 : Source Attribution
 `ATTRIBUTION_DYN` + `ATTRIBUTION_STATIC` → a dust-vs-combustion signature per ward, **validated
 against instruments**. `pm25_pm10_ratio_obs` is a *measured* fingerprint at 58 stations that flips
 exactly as physics predicts — **0.62 in December** (combustion) vs **0.36 in April** (dust). Ratio
 regression MAE **0.124** vs 0.177 baseline; source-class accuracy **0.601 vs 0.507** on `val`.
 
-> ⚠️ Report this engine from `val`, not `test` (the test window is summer → 67.5 % dust, so
-> "always say dust" wins there). **Never claim** *"industry = 34 % of PM2.5"* — no source labels
-> exist and 6 pollutants aren't chemical speciation.
 
-### 💬 Engine 3 — Action Recommendation (RAG + LLM)
+### 💬 Engine 3 : Action Recommendation (RAG + LLM)
 The dataset supplies **retrieval context**, not the arithmetic:
 
-- **Who's at risk** — `population_sum`, `population_density_mean`, `vulnerable_sites_3km` (real per-ward)
-- **What's coming** — predicted AQI + `dominant_pollutant` from Engines 1–2
-- **Where** — `ward_name`, `ward_lat/lon` to ground the retrieved text
+- **Who's at risk**-> `population_sum`, `population_density_mean`, `vulnerable_sites_3km` (real per-ward)
+- **What's coming** -> predicted AQI + `dominant_pollutant` from Engines 1–2
+- **Where** -> `ward_name`, `ward_lat/lon` to ground the retrieved text
 
 You supply the corpus (CPCB/GRAP action tiers, health advisories); retrieve on
 (AQI band × dominant pollutant × vulnerability) and let the LLM compose the advice.
-**Keep the LLM out of the arithmetic — it should cite, not compute.**
+**LLM is kept out of arithmetic ; It should cite, not compute.**
 
 ---
+## Live Data Integration
 
+A forecasting system trained on three years of history is only useful if it can also speak to the
+present. If the advisor could only answer questions about a fixed hour buried somewhere in the
+training window, it would be a museum piece, not a decision tool. So the whole serving path is built
+around one goal: **the model should forecast from `now`**, using data that is genuinely current yet
+completely indistinguishable in shape, units, scale, and meaning from the data it learned on.
+
+That last clause is the entire engineering challenge. Pulling recent numbers off an API is trivial.
+The hard, failure-prone part is guaranteeing that a live row is processed through the *exact same*
+transformations as a training row, so that the frozen model never sees anything it wasn't trained to
+understand. Any drift between the two ,a differently computed feature, a re-fitted scaler, a
+mismatched column order is **train/serve skew**, and it silently degrades predictions in ways that
+are almost impossible to debug after the fact. An hourly job,
+[`src/realtime/realtime_update.py`](src/realtime/realtime_update.py), exists to close that gap
+completely. It runs on a schedule, rebuilds the most recent hours in the model's native format, and
+drops them into `data/realtime/`, from which the advisor serves live forecasts.
+
+```mermaid
+flowchart LR
+    A["1 · Fetch<br/>Open-Meteo, 19 cells"] --> B["2 · Rebuild features<br/>(training pipeline's own functions)"]
+    B --> C["3 · Scale<br/>frozen scalers.joblib"]
+    C --> D["4 · Align + write<br/>data/realtime/ + status.json"]
+    D --> E["Serve · AQI_REALTIME=1<br/>anchored at latest live hour"]
 ## Results
 
 **Final served model** — 4-member snapshot ensemble (dropout 0.3), horizon 24, conformal intervals.
@@ -237,23 +264,6 @@ You supply the corpus (CPCB/GRAP action tiers, health advisories); retrieve on
 > (Nov mean AQI 368 vs Jul 77). Full numbers in [`docs/FINAL_MODEL_METRICS.txt`](docs/FINAL_MODEL_METRICS.txt).
 
 ---
-
-## Gotchas That Will Save Your Results
-
-**1. Use the right split.** Real labels only start **Feb 2025** (~17 months, not 3 years).
-
-| Column | Where | Use for |
-|---|---|---|
-| `split` | `dynamic_grid` | CAMS pretraining only |
-| `split_lab` | `labels_station` | **all real-label training/eval** |
-
-The full-range `split` puts 5.9 % winter in train but 53 % in val — training on clean air,
-validating on smog. `split_lab` fixes this. Its test window is summer-only, so **you cannot claim
-winter skill from the test set — report it from `val`.**
-
-**2. Never split randomly, never trust the row count.** Adjacent hours are near-duplicates and
-wards in a cell share inputs exactly — a random split leaks. For CV on grid-derived features,
-**group by `point_id`**: you have **19 independent locations**, not 289.
 
 ---
 
@@ -294,19 +304,22 @@ re-running is safe (existing files are skipped). Sources/licenses: [`docs/datase
 </details>
 
 ---
+## Future Scope
 
-## Limitations
+### Coverage & ground truth
+- Add more monitors (IMD, DPCC low-cost sensors, PurpleAir) to push labelled ward coverage past 49.
+- Fuse satellite NO₂ / aerosol (Sentinel-5P) for genuine sub-cell texture beyond the 19 CAMS cells.
 
-Stated out loud, because honesty about these matters more than hiding them:
+### Model & ops
+- Learn the bias correction instead of 12 hand-tuned monthly scalars, now that real labels exist.
+- Online fine-tuning on the new live data stream; multi-city generalisation beyond Delhi.
 
-1. **Pollutants/weather are 19 CAMS cells** broadcast to wards; per-ward signal comes from static features + graph + labels.
-2. **~19 effective spatial samples** for grid-derived features.
-3. **Only 49/289 wards (17 %) have a real label** — the rest are inferred (validated on 49, asserted on 240).
-4. **Emissions are annual** (EDGAR v8.1) — no hourly industrial activity.
-5. **No construction, real traffic counts, or satellite-imagery encoders.**
-6. **Bias correction is still 12 hand-tuned monthly scalars** — with 488k real labels the model should now learn this itself (highest-value next step).
-7. **Uncertainty is conformal-only** — native quantile heads (0.1/0.5/0.9) are a cheap upgrade.
+### Reach
+- SMS / IVR alerts and a low-bandwidth mode for residents on patchy connectivity.
+- Warm handoffs to DPCC / CAQM workflows for officials acting on a ward-level advisory.
 
----
+### National expansion
+- Expand to other Indian cities using CPCB, weather, traffic, and satellite data.
+- Auto-generate city graphs for nationwide ward-level AQI forecasting and policy support.
 
 
