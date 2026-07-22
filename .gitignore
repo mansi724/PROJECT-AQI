@@ -23,6 +23,29 @@ env/
 # ---- logs / scratch ----
 *.log
 
+# ---- dev planning docs (kept locally, not needed on GitHub; README.md is the public one) ----
+ADVISOR.md
+FEATURES.md
+IMPROVEMENTS.md
+MODELS.md
+PLAN.md
+PREPROCESSING.md
+SETUP.md
+
+# ---- one-off build / analysis scripts (superseded by the main pipeline) ----
+add_emissions.py
+add_training_features.py
+apply_corrections.py
+build_dataset.py
+build_emissions.py
+build_features.py
+check_data.py
+compare_temporal.py
+feature_lists.py
+merge_data.py
+report_forecast_quality.py
+sweep_gnn.py
+
 # ============================================================
 # DATA — this is the important part
 # ============================================================

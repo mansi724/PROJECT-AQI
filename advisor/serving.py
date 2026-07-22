@@ -62,7 +62,13 @@ class Forecast:
 class ForecastService:
     def __init__(self, config: AdvisorConfig = CONFIG):
         self.cfg = config
-        self.ctx = ExplainContext(horizon=config.horizon, device=config.device)
+        # Live serving: set the env flag BEFORE building the context / raw dynamics
+        # so load_stgnn + RawDynamics overlay the realtime window (§1.7).
+        if config.realtime:
+            import os
+            os.environ["AQI_REALTIME"] = "1"
+        self.ctx = ExplainContext(horizon=config.horizon, device=config.device,
+                                  realtime=config.realtime)
         self.d = self.ctx.d
         self.attr = SourceAttributor.load(config.attribution_tag)
         self.fs = get_feature_scaler()
@@ -74,10 +80,17 @@ class ForecastService:
         self._n_static = len(self.static_names)
 
         # attribution feature frames (scaled) for arbitrary ward-hours
+        _attr_cols = ["point_id", "time"] + list(dict.fromkeys(ATTRIBUTION_DYN))
         self._attr_dyn = pd.read_parquet(
             self.cfg.serving_dir.parent / "gnn_processed" / "dynamic_grid_norm.parquet",
-            columns=["point_id", "time"] + list(dict.fromkeys(ATTRIBUTION_DYN)),
-        ).set_index(["point_id", "time"]).sort_index()
+            columns=_attr_cols,
+        )
+        rt_norm = self.cfg.serving_dir.parent / "realtime" / "dynamic_grid_norm.parquet"
+        if config.realtime and rt_norm.exists():         # overlay live hours (§1.7)
+            rt = pd.read_parquet(rt_norm, columns=_attr_cols)
+            self._attr_dyn = (pd.concat([self._attr_dyn, rt], ignore_index=True)
+                              .drop_duplicates(["point_id", "time"], keep="last"))
+        self._attr_dyn = self._attr_dyn.set_index(["point_id", "time"]).sort_index()
         self._attr_static = self.d.nodes.set_index("node_idx")[
             list(dict.fromkeys(ATTRIBUTION_STATIC))]
 
@@ -151,6 +164,13 @@ class ForecastService:
                 "industry_count_5km": rget("industry_count_5km")}
 
     def latest_time_index(self) -> int:
+        # Live serving (§1.7): forecast FROM the latest observed hour (now) — no
+        # label window is needed since we predict forward, not evaluate. Falls back
+        # to the historical "last t with a real t+h label" when realtime is off.
+        if self.cfg.realtime:
+            now = np.datetime64(pd.Timestamp.now("UTC").tz_localize(None))
+            pos = int(np.searchsorted(self.times, now, side="right") - 1)
+            return int(min(max(pos, 0), len(self.times) - 1))
         return int(len(self.times) - 1 - self.cfg.horizon)  # last t with a real label window
 
     def resolve_time(self, time=None, time_index=None) -> int:
@@ -255,6 +275,20 @@ class ForecastService:
             prof = self.attr.profile(self._attr_row(int(r.node_idx), t))
             out[str(r.ward_id)] = prof.get("dominant_class", "mixed")
         return out
+
+    def aqi_heatmap(self, node_idx: int) -> dict:
+        """11.1 — day-of-week × hour-of-day mean AQI for the ward's cell over the
+        full history (reveals rush-hour + weekly pollution rhythms)."""
+        pid = int(self.d.nodes.loc[self.d.nodes["node_idx"] == node_idx, "point_id"].iloc[0])
+        sl = self.raw.df.loc[pid]["aqi"].dropna()
+        idx = sl.index
+        agg = pd.DataFrame({"dow": idx.dayofweek, "hour": idx.hour, "aqi": sl.values})
+        piv = agg.groupby(["dow", "hour"])["aqi"].mean()
+        mat = [[None] * 24 for _ in range(7)]
+        for (dd, hh), v in piv.items():
+            mat[int(dd)][int(hh)] = round(float(v), 0)
+        return {"days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+                "hours": list(range(24)), "matrix": mat}
 
     def wind_rose(self, node_idx: int, t: int, hours: int = 48) -> dict:
         """Wind speed binned by 16 compass directions over the last `hours`

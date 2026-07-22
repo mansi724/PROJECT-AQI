@@ -40,7 +40,7 @@ class ExplainContext:
     """Loads the snapshot checkpoint + data and builds (x, edge_index, edge_attr)
     for any timestep, plus name lookups. All the glue the explainers share."""
 
-    def __init__(self, horizon: int = 24, device: str = "cpu"):
+    def __init__(self, horizon: int = 24, device: str = "cpu", realtime: bool | None = None):
         self.device = torch.device(device if (device == "cpu" or torch.cuda.is_available()) else "cpu")
         ckpt_path = CKPT_DIR / f"gnn_forecast_h{horizon}_notemporal.pt"
         if not ckpt_path.exists():
@@ -48,7 +48,7 @@ class ExplainContext:
                 f"{ckpt_path} not found — train the snapshot model first:\n"
                 f"  python train_gnn.py --horizon {horizon} --no-temporal")
         ckpt = torch.load(ckpt_path, map_location=self.device, weights_only=False)
-        self.d = load_stgnn(horizon=horizon)
+        self.d = load_stgnn(horizon=horizon, realtime=realtime)
         self.y_mu, self.y_sd = ckpt["y_mu"], ckpt["y_sd"]
         self.feature_names = self.d.static_names + self.d.dyn_names
 

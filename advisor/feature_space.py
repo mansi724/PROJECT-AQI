@@ -16,6 +16,7 @@ Two services:
 """
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -26,6 +27,7 @@ import pandas as pd
 BASE = Path(__file__).resolve().parent.parent
 PROC = BASE / "data" / "gnn_processed"
 RAW_DYN = BASE / "data" / "gnn" / "dynamic_grid.parquet"
+RAW_DYN_REALTIME = BASE / "data" / "realtime" / "dynamic_grid.parquet"
 
 # groups(cols) key  ->  scalers(fitted object) key
 _GROUP_ALIAS = {
@@ -97,6 +99,13 @@ class RawDynamics:
                 "wind_gusts_10m", "surface_pressure", "boundary_layer_height",
                 "precipitation", "fire_count", "fire_frp_sum"]
         df = pd.read_parquet(path, columns=cols)
+        # Live serving (opt-in): overlay the rolling realtime window so display
+        # panels (current AQI, meteorology, 48 h trend) show live values. Live
+        # rows win on overlapping (point_id, time); history is preserved.
+        if os.getenv("AQI_REALTIME", "0") == "1" and RAW_DYN_REALTIME.exists():
+            rt = pd.read_parquet(RAW_DYN_REALTIME, columns=cols)
+            df = (pd.concat([df, rt], ignore_index=True)
+                    .drop_duplicates(["point_id", "time"], keep="last"))
         self.df = df.set_index(["point_id", "time"]).sort_index()
 
     def at(self, point_id: int, time) -> dict:

@@ -245,6 +245,19 @@ def reference():
             "n_times": int(len(svc().times)), "latest_index": svc().latest_time_index()}
 
 
+@app.get("/realtime")
+def realtime_status():
+    """Live ingestion state (§1.7): whether forecasts are served from live data,
+    when it was last refreshed, and the basis hour the dashboard is showing."""
+    import json
+    s = svc()
+    t = s.latest_time_index()
+    status_path = CONFIG.serving_dir.parent / "realtime" / "status.json"
+    ingest = json.loads(status_path.read_text()) if status_path.exists() else None
+    return {"live": bool(CONFIG.realtime), "basis_time": str(s.times[t]),
+            "basis_index": t, "data_max_time": str(s.times.max()), "ingest": ingest}
+
+
 @app.get("/map")
 def map_layer(time_index: int | None = Query(None)):
     t = _resolve_t(time_index)
@@ -263,6 +276,19 @@ def forecast(ward_id: str, time_index: int | None = None, horizon: int = 24):
     return {**fc.as_dict(), "ward_id": ward_id, "time": str(fc.time),
             "available_horizons": s.available_horizons(),
             "history": s.history(node, t, hours=48)}
+
+
+@app.get("/heatmap")
+def heatmap(ward_id: str):
+    """11.1 — day-of-week × hour AQI heatmap for a ward."""
+    s = svc()
+    try:
+        node = s.ward_to_node(ward_id)
+    except ValueError:
+        raise HTTPException(404, f"ward {ward_id} not found")
+    if ("heatmap", node) not in _STATE:
+        _STATE[("heatmap", node)] = s.aqi_heatmap(node)
+    return _STATE[("heatmap", node)]
 
 
 @app.get("/windrose")
@@ -286,12 +312,56 @@ def context(ward_id: str, time_index: int | None = None, explain: bool = False):
 
 
 @app.get("/advise")
-def advise(ward_id: str, time_index: int | None = None, explain: bool = False):
+def advise(ward_id: str, time_index: int | None = None, explain: bool = False,
+           weights: str | None = None):
+    import json as _json
+    w = None
+    if weights:                            # 10.2 — user-tunable objective weights (JSON)
+        try:
+            w = {k: float(v) for k, v in _json.loads(weights).items()}
+        except Exception:
+            raise HTTPException(400, "weights must be a JSON object of {objective: number}")
     try:
         return pipeline().advise(ward_id=ward_id, time_index=time_index,
-                                 include_explanations=explain)
+                                 include_explanations=explain, ranking_weights=w)
     except ValueError as e:
         raise HTTPException(404, str(e))
+
+
+@app.get("/portfolio")
+def portfolio(ward_id: str, budget: float = 1.5, time_index: int | None = None):
+    """10.4 — best COMBINATION of actions under a cost budget (greedy by AQI-drop
+    per cost), with the combined counterfactual of the chosen set."""
+    from advisor.simulation.counterfactual import CounterfactualSimulator
+    from advisor.config import ACTION_CATALOGUE, INTERVENTION_STAGES, grap_stage
+    s = svc()
+    try:
+        node = s.ward_to_node(ward_id)
+    except ValueError:
+        raise HTTPException(404, f"ward {ward_id} not found")
+    t = _resolve_t(time_index)
+    sim = CounterfactualSimulator(s)
+    stage = grap_stage(s.forecast(node, t).p50)
+    # candidate actions applicable at this stage, scored by drop-per-cost
+    cands = []
+    for aid, meta in ACTION_CATALOGUE.items():
+        if stage and INTERVENTION_STAGES.get(aid) and stage not in INTERVENTION_STAGES[aid]:
+            continue
+        drop = max(-sim.simulate_action(node, t, aid).delta, 0.0)
+        cost = float(meta.get("cost", 0.5))
+        cands.append({"action": aid, "label": meta.get("label", aid), "cost": cost,
+                      "solo_drop": round(drop, 1), "eff": drop / (cost + 0.05)})
+    cands.sort(key=lambda d: -d["eff"])
+    chosen, spent = [], 0.0
+    for c in cands:
+        if spent + c["cost"] <= budget:
+            chosen.append(c); spent += c["cost"]
+    combined = sim.simulate_actions(node, t, [c["action"] for c in chosen]).as_dict() if chosen else None
+    return {"ward_id": ward_id, "budget": budget, "spent_cost": round(spent, 2),
+            "grap_stage": stage, "chosen": chosen,
+            "combined_aqi_before": combined["aqi_before"] if combined else None,
+            "combined_aqi_after": combined["aqi_after"] if combined else None,
+            "combined_improvement_pct": combined["improvement_pct"] if combined else 0}
 
 
 class CFRequest(BaseModel):

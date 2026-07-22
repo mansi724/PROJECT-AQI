@@ -30,9 +30,13 @@ class ActionRanker:
         self.cfg = config
         self.w = config.ranking_weights
 
-    def rank(self, actions: list, counterfactuals: dict, ward_context: dict) -> list[dict]:
+    def rank(self, actions: list, counterfactuals: dict, ward_context: dict,
+             weights: dict | None = None) -> list[dict]:
         """actions: validated LLM interventions (each a dict with 'action', 'confidence',
-        optional '_validation', 'citations'). counterfactuals: {action_id: CounterfactualResult-like dict}."""
+        optional '_validation', 'citations'). counterfactuals: {action_id: CounterfactualResult-like dict}.
+        `weights` (10.2) overrides the config objective weights so a policymaker can
+        reweight impact vs cost vs speed live."""
+        w = {**self.w, **(weights or {})}
         if not actions:
             return []
         # improvement range for normalisation (across the candidate set)
@@ -60,7 +64,7 @@ class ActionRanker:
             objectives = {"aqi_improvement": o_improve, "confidence": o_conf,
                           "policy_strength": o_policy, "feasibility": o_feas,
                           "cost": o_cost, "time_to_effect": o_time}
-            score = sum(self.w[k] * objectives[k] for k in self.w)
+            score = sum(w[k] * objectives[k] for k in w)
             ranked.append({
                 "action": aid,
                 "title": a.get("title", cat.get("label", aid)),
@@ -75,7 +79,27 @@ class ActionRanker:
         ranked.sort(key=lambda d: -d["score"])
         for i, r in enumerate(ranked, 1):
             r["rank"] = i
+        self._mark_pareto(ranked)          # 10.3
         return ranked
+
+    @staticmethod
+    def _mark_pareto(ranked: list) -> None:
+        """10.3 — flag Pareto-optimal actions: those not dominated on ALL objectives
+        by another. A dominated action is beaten (>=) everywhere and strictly worse
+        somewhere; the survivors are the defensible trade-off frontier."""
+        objs = [r["objectives"] for r in ranked]
+        keys = list(objs[0].keys()) if objs else []
+        for i, ri in enumerate(ranked):
+            dominated = False
+            for j, rj in enumerate(ranked):
+                if i == j:
+                    continue
+                ge_all = all(objs[j][k] >= objs[i][k] for k in keys)
+                gt_any = any(objs[j][k] > objs[i][k] for k in keys)
+                if ge_all and gt_any:
+                    dominated = True
+                    break
+            ri["pareto_optimal"] = not dominated
 
     def _policy_strength(self, action: dict, aid: str, dominant: set) -> float:
         s = 1.0

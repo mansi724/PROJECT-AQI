@@ -34,6 +34,7 @@ GNN and the GBDT baseline in the same units.
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -47,8 +48,31 @@ from gnn_data import (
 
 BASE = Path(__file__).resolve().parent
 PROC = BASE / "data" / "gnn_processed"
+REALTIME = BASE / "data" / "realtime"
 
 DYN_DEFAULT = DYN_CURRENT + DYN_DERIVED + DYN_SIGNATURE + DYN_HISTORY
+
+
+def _realtime_on(flag: bool | None) -> bool:
+    """Live serving is opt-in: explicit arg wins, else the AQI_REALTIME env flag.
+    Training paths never pass the flag, so they stay on the frozen historical set."""
+    if flag is not None:
+        return flag
+    return os.getenv("AQI_REALTIME", "0") == "1"
+
+
+def _append_realtime(dyn: pd.DataFrame) -> pd.DataFrame:
+    """Concat the live rolling window onto the historical dynamic frame, letting
+    live rows win on any overlapping (point_id, time). Missing/extra columns are
+    reconciled to the historical schema so the downstream pivot is unaffected."""
+    rt_path = REALTIME / "dynamic_grid_norm.parquet"
+    if not rt_path.exists():
+        return dyn
+    rt = pd.read_parquet(rt_path)
+    rt = rt.reindex(columns=dyn.columns)      # align to historical schema
+    both = pd.concat([dyn, rt], ignore_index=True)
+    both = both.drop_duplicates(["point_id", "time"], keep="last").reset_index(drop=True)
+    return both
 
 
 @dataclass
@@ -126,11 +150,15 @@ class STGNNData:
         return (np.cos(b) * w_cos + np.sin(b) * w_sin).astype("float32")
 
 
-def load_stgnn(horizon: int = 24, dyn_features: list | None = None) -> STGNNData:
+def load_stgnn(horizon: int = 24, dyn_features: list | None = None,
+               realtime: bool | None = None) -> STGNNData:
     nodes = pd.read_parquet(PROC / "nodes_static_norm.parquet").sort_values("node_idx").reset_index(drop=True)
     edges = pd.read_parquet(PROC / "edges_norm.parquet")
     dyn = pd.read_parquet(PROC / "dynamic_grid_norm.parquet")
     labels = pd.read_parquet(PROC / "labels_station_clean.parquet")
+
+    if _realtime_on(realtime):
+        dyn = _append_realtime(dyn)
 
     dyn_names = [c for c in (dyn_features or DYN_DEFAULT) if c in dyn.columns and c not in LEAK]
     static_names = [c for c in STATIC_FEATURES if c in nodes.columns]

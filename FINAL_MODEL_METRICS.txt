@@ -1,0 +1,9 @@
+FINAL SERVED MODEL — 4-member snapshot ensemble (dropout 0.3), h24
+generated 2026-07-20 23:53
+members loaded: 4  | conformal deltas: {24: 19.030227661132812, 48: 26.9681396484375, 72: 30.839111328125}
+
+train: RMSE  38.88 | MAE  26.64 | persistence  60.29 | skill +35.5% | p10-90 coverage 0.94 | n=81,180
+  val: RMSE  69.49 | MAE  49.94 | persistence  78.37 | skill +11.3% | p10-90 coverage 0.80 | n=20,617
+ test: RMSE  53.25 | MAE  39.70 | persistence  70.24 | skill +24.2% | p10-90 coverage 0.82 | n=18,848
+
+(val=winter, the honest generalisation metric; test=summer. skill = % better than persistence baseline.)

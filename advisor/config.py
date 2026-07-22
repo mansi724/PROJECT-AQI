@@ -223,6 +223,18 @@ class AdvisorConfig:
     attribution_tag: str = "attribution"
     device: str = _env("ADVISOR_DEVICE", "cpu")  # CPU is plenty for single-ward inference
 
+    # ---- live ingestion (IMPROVEMENTS §1.7) ----
+    # Serve forecasts from `now` using the rolling window realtime_update.py writes
+    # to data/realtime/. Auto-on when that data exists; falls back to the frozen
+    # historical window when it doesn't, so nothing breaks. AQI_REALTIME forces it
+    # on ("1") or off ("0") regardless of whether the live files are present.
+    realtime: bool = field(default_factory=lambda: (
+        {"1": True, "0": False}.get(
+            os.getenv("AQI_REALTIME", ""),
+            (DATA_DIR / "realtime" / "dynamic_grid_norm.parquet").exists(),
+        )
+    ))
+
     # ---- knowledge base / documents ----
     kb_dir: Path = DATA_DIR / "kb"
     kb_corpus_dir: Path = DATA_DIR / "kb" / "corpus"

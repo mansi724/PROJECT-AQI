@@ -35,7 +35,8 @@ class AdvisorPipeline:
         self.ranker = ranker or ActionRanker(config)
 
     def advise(self, ward_id: str | None = None, node_idx: int | None = None,
-               time=None, time_index=None, include_explanations: bool = True) -> dict:
+               time=None, time_index=None, include_explanations: bool = True,
+               ranking_weights: dict | None = None) -> dict:
         # 1. Context
         wc = self.context_builder.build(ward_id=ward_id, node_idx=node_idx, time=time,
                                         time_index=time_index,
@@ -73,7 +74,7 @@ class AdvisorPipeline:
                 node, t, [a["action"] for a in valid_actions]).as_dict()
 
         # 7. Ranking
-        ranked = self.ranker.rank(valid_actions, cf_map, ctx)
+        ranked = self.ranker.rank(valid_actions, cf_map, ctx, weights=ranking_weights)
 
         return {
             "context": ctx,
